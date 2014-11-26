@@ -105,7 +105,13 @@ def main():
                 manager_blueprints_base_dir):
             _patch_properties(manager_blueprint,
                               shared_manager_blueprint_properties)
-
+            print '$$$ patching openstack.yaml'
+            if 'openstack.yaml' in manager_blueprint:
+                with YamlPatcher(manager_blueprint) as patch:
+                    patch.set_value('node_templates.manager.properties.cloudify.cloudify_agent.min_workers', 0)  # NOQA
+                print '$$$ patched!'
+            else:
+                print '$$$ not patched!'
 
 def _patch_properties(path, properties, is_json=False):
     with YamlPatcher(path, is_json) as patch:
@@ -115,8 +121,6 @@ def _patch_properties(path, properties, is_json=False):
                 if env_var is 'WORKFLOW_TASK_RETRIES':
                     value = int(value)
                 patch.set_value(prop_path, value)
-        if not is_json:
-            patch.set_value('node_templates.manager.properties.cloudify.cloudify_agent.min_workers', 0)  # NOQA
 
 
 def _get_manager_blueprints(manager_blueprints_base_dir):
