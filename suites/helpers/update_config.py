@@ -61,6 +61,7 @@ shared_manager_blueprint_properties = {
         '.windows_agent_url',
     'WORKFLOW_TASK_RETRIES' :
         'node_templates.manager.properties.cloudify.workflows.task_retries',
+
 }
 
 
@@ -114,6 +115,7 @@ def _patch_properties(path, properties, is_json=False):
                 if env_var is 'WORKFLOW_TASK_RETRIES':
                     value = int(value)
                 patch.set_value(prop_path, value)
+        patch.set_value('node_templates.manager.properties.cloudify.cloudify_agent.min_workers', 0)  # NOQA
 
 
 def _get_manager_blueprints(manager_blueprints_base_dir):
