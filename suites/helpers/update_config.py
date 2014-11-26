@@ -115,7 +115,8 @@ def _patch_properties(path, properties, is_json=False):
                 if env_var is 'WORKFLOW_TASK_RETRIES':
                     value = int(value)
                 patch.set_value(prop_path, value)
-        patch.set_value('node_templates.manager.properties.cloudify.cloudify_agent.min_workers', 0)  # NOQA
+        if not is_json:
+            patch.set_value('node_templates.manager.properties.cloudify.cloudify_agent.min_workers', 0)  # NOQA
 
 
 def _get_manager_blueprints(manager_blueprints_base_dir):
