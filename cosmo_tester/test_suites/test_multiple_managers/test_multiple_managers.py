@@ -31,7 +31,6 @@ class MultiManagerTest(OpenStackNodeCellarTest):
 
     def _restore_snapshot(self, client, name):
         execution = client.snapshots.restore(name, True)
-        time.sleep(3)
         self.wait_for_execution(execution, self.default_timeout, client)
 
     def before_uninstall(self):
