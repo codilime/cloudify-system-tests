@@ -89,9 +89,6 @@ class MultiManagerTest(OpenStackNodeCellarTest):
         super(MultiManagerTest, self).execute_uninstall(
             cfy=self.additional_cfys[0])
 
-    def assert_monitoring_data_exists(self):
-        pass
-
     def post_uninstall_assertions(self, client=None):
         super(MultiManagerTest, self).post_uninstall_assertions(
             self.additional_clients[0])
