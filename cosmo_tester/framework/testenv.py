@@ -436,13 +436,16 @@ class TestCase(unittest.TestCase):
                         str(blueprint_path))
         return blueprint_path
 
-    def wait_for_execution(self, execution, timeout):
+    def wait_for_execution(self, execution, timeout, assert_success=True):
         end = time.time() + timeout
         while time.time() < end:
             status = self.client.executions.get(execution.id).status
             if status == 'failed':
-                raise AssertionError('Execution "{}" failed'.format(
-                    execution.id))
+                if assert_success:
+                    raise AssertionError('Execution "{}" failed'.format(
+                        execution.id))
+                else:
+                    return
             if status == 'terminated':
                 return
             time.sleep(1)

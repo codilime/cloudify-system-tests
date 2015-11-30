@@ -14,24 +14,28 @@
 #    * limitations under the License.
 
 import os
-import time
 
-from cloudify_rest_client.executions import Execution
-from cosmo_tester.test_suites.test_blueprints.hello_world_bash_test import clone_hello_world
+from cosmo_tester.test_suites.test_blueprints.hello_world_bash_test \
+    import clone_hello_world
 from cosmo_tester.framework.testenv import TestCase
+
+
+EXECUTION_TIMEOUT = 120
+
 
 class SnapshotsHelloWorldTest(TestCase):
 
     def _assert_manager_clean(self):
         state = self.get_manager_state()
         for v in state.itervalues():
-            self.assertFalse(v)
+            self.assertFalse(bool(v), 'Manager is not clean')
 
-    def _assert_manager_state(self, blueprints_ids, deployment_ids):
+    def _assert_manager_state(self, blueprints_ids, deployments_ids):
         state = self.get_manager_state()
-        self.assertEquals(set(blueprints_ids), state['blueprints'].keys())
-        self.assertEquals(set(deployments_ids), state['deployments'].keys())
-    
+        self.assertEquals(set(blueprints_ids), set(state['blueprints'].keys()))
+        self.assertEquals(set(deployments_ids),
+                          set(state['deployments'].keys()))
+
     def setUp(self):
         super(SnapshotsHelloWorldTest, self).setUp()
         self._assert_manager_clean()
@@ -40,109 +44,117 @@ class SnapshotsHelloWorldTest(TestCase):
         self.counter = 0
 
     def tearDown(self):
-        print 'tearing down'
         state = self.get_manager_state()
         for d in state['deployments']:
-            print d
+            self.wait_until_all_deployment_executions_end(d)
             self.client.deployments.delete(d)
         for b in state['blueprints']:
-            print b
             self.client.blueprints.delete(b)
         super(SnapshotsHelloWorldTest, self).tearDown()
 
-    def _deploy(self, deployment_id, blueprint_id):
+    def _deploy(self, deployment_id, blueprint_id=None):
+        if blueprint_id is None:
+            blueprint_id = deployment_id
         self.upload_blueprint(blueprint_id)
-        inputs={
+        # TODO: replace it with values from env
+        inputs = {
             'agent_user': 'ubuntu',
             'image': '9d25fe2d-cf31-4b05-8c58-f238ec78e633',
             'flavor': '103'
         }
         self.create_deployment(blueprint_id, deployment_id, inputs=inputs)
-        self.wait_for_stop_dep_env_execution_to_end(deployment_id)
-    
+        self.wait_until_all_deployment_executions_end(deployment_id)
+
+    def _delete(self, deployment_id, blueprint_id=None):
+        if blueprint_id is None:
+            blueprint_id = deployment_id
+        self.client.deployments.delete(deployment_id)
+        self.client.blueprints.delete(blueprint_id)
+
     def _uuid(self):
         self.counter += 1
         return '{0}_{1}'.format(self.test_id, self.counter)
 
+    def _create_snapshot(self, snapshot_id):
+        self.logger.info('Creating snapshot {0}'.format(snapshot_id))
+        execution = self.client.snapshots.create(snapshot_id,
+                                                 include_metrics=False,
+                                                 include_credentials=False)
+        self.wait_for_execution(execution, timeout=EXECUTION_TIMEOUT)
+
+    def _restore_snapshot(self, snapshot_id, force=False, assert_success=True):
+        self.logger.info('Restoring snapshot {0}'.format(snapshot_id))
+        execution = self.client.snapshots.restore(snapshot_id, force=force)
+        self.wait_for_execution(execution, timeout=EXECUTION_TIMEOUT,
+                                assert_success=assert_success)
+        return self.client.executions.get(execution_id=execution.id)
+
+    def _restore_snapshot_failure_expected(self, snapshot_id, force=False):
+        old_state = self.get_manager_state()
+        execution = self._restore_snapshot(snapshot_id, force=force,
+                                           assert_success=False)
+        self.assertEquals(execution.status, 'failed')
+        new_state = self.get_manager_state()
+        self.assertEquals(old_state, new_state)
+        self.logger.info('Restoring snapshot {0} failed as expected'.format(
+                         snapshot_id))
+        return execution
+
     def test_simple(self):
         dep = self._uuid()
-        self._deploy(dep, dep)
-        self.client.snapshots.create(dep, include_metrics=False,
-                                     include_credentials=False)
-        self.client.deployments.delete(dep)
-        self.client.blueprints.delete(dep)
-        self.wait_until_all_deployment_executions_end(dep)
+        self._deploy(dep)
+        self._create_snapshot(dep)
+        self._delete(dep)
         self._assert_manager_clean()
-        self.client.snapshots.restore(dep)
-        self._assert_manager_state(blueprinds_ids={dep},
-                                   deployment_ids={dep})
+        self._restore_snapshot(dep)
+        self._assert_manager_state(blueprints_ids={dep},
+                                   deployments_ids={dep})
         self.client.snapshots.delete(dep)
-        self.client.deployments.delete(dep)
-        self.client.blueprints.delete(dep)
+        self._delete(dep)
 
-        
+    def test_not_clean(self):
+        dep = self._uuid()
+        self._deploy(dep)
+        self._create_snapshot(dep)
+        self._restore_snapshot_failure_expected(dep)
 
-#    def test_openstack_helloworld(self):
-#        return
-##       self._assert_manager_clean()
-##        self.blueprint_id = self.test_id
-##        self.deployment_id = self.test_id
-##        self.repo_dir = clone_hello_world(self.workdir)
-##        self.blueprint_yaml = os.path.join(self.repo_dir, 'blueprint.yaml')
-#        print str(inputs)
-##        self.upload_deploy_and_execute_install(inputs=inputs)
-#        self.client.deployments.delete(self.deployment_id)
-#        self.client.blueprints.delete(self.deployment_id)
+    def test_force_with_conflict(self):
+        dep = self._uuid()
+        snapshot = self._uuid()
+        self._deploy(dep)
+        self._create_snapshot(snapshot)
+        execution = self._restore_snapshot_failure_expected(snapshot,
+                                                            force=True)
+        self.assertIn(dep, execution.error)
 
-    def on_nodecellar_installed(self):
-        snapshot_id = 'nodecellar_sn-{0}'.format(time.strftime("%Y%m%d-%H%M"))
+    def test_force_with_deployment_conflict(self):
+        deployment = self._uuid()
+        blueprint = self._uuid()
+        snapshot = self._uuid()
+        self._deploy(deployment_id=deployment, blueprint_id=blueprint)
+        self._assert_manager_state(blueprints_ids={blueprint},
+                                   deployments_ids={deployment})
+        self._create_snapshot(snapshot)
+        self._delete(deployment_id=deployment, blueprint_id=blueprint)
+        new_blueprint = self._uuid()
+        self._deploy(deployment_id=deployment, blueprint_id=new_blueprint)
+        self._assert_manager_state(blueprints_ids={new_blueprint},
+                                   deployments_ids={deployment})
+        execution = self._restore_snapshot_failure_expected(snapshot,
+                                                            force=True)
+        self.assertIn(deployment, execution.error)
 
-        self.cfy.create_deployment(self.blueprint_id, self.additional_dep_id,
-                                   inputs=self.get_inputs())
-        self.wait_until_all_deployment_executions_end(self.additional_dep_id)
-
-        self.wait_for_stop_dep_env_execution_to_end(self.deployment_id)
-        self.client.snapshots.create(snapshot_id, True, True)
-
-        waited = 0
-        time_between_checks = 5
-        snapshot = self.client.snapshots.get(snapshot_id)
-        while snapshot.status == 'creating':
-            time.sleep(time_between_checks)
-            waited += time_between_checks
-            self.assertTrue(
-                waited <= 3 * 60,
-                'Waiting too long for create snapshot to finish'
-            )
-            snapshot = self.client.snapshots.get(snapshot_id)
-        self.assertEqual('created', snapshot.status)
-
-        self.cfy.delete_deployment(self.deployment_id, ignore_live_nodes=True)
-        self.cfy.delete_deployment(self.additional_dep_id)
-        self.client.blueprints.delete(self.blueprint_id)
-        self.logger.info('Deleting all plugins from manager...')
-        plugins = self.client.plugins.list()
-        for plugin in plugins:
-            self.logger.info(
-                'Deleting plugin: {0} - {1}'.format(plugin.id,
-                                                    plugin.package_name))
-            self.client.plugins.delete(plugin.id)
-
-        waited = 0
-        execution = self.client.snapshots.restore(snapshot_id)
-        while execution.status not in Execution.END_STATES:
-            waited += time_between_checks
-            time.sleep(time_between_checks)
-            self.assertTrue(
-                waited <= 20 * 60,
-                'Waiting too long for restore snapshot to finish'
-            )
-            execution = self.client.executions.get(execution.id)
-        if execution.status == Execution.FAILED:
-            self.logger.error('Execution error: {0}'.format(execution.error))
-        self.assertEqual(Execution.TERMINATED, execution.status)
-
-        self.logger.info('Snapshot restored, deleting snapshot..')
-        self.client.snapshots.delete(snapshot_id)
-        # Throws if not found
-        self.client.deployments.delete(self.additional_dep_id)
+    def test_force_no_conflict(self):
+        dep = self._uuid()
+        self._deploy(dep)
+        self._create_snapshot(dep)
+        self._delete(dep)
+        self._assert_manager_clean()
+        dep2 = self._uuid()
+        self._deploy(dep2)
+        self._restore_snapshot(dep, force=True)
+        self._assert_manager_state(blueprints_ids={dep, dep2},
+                                   deployments_ids={dep, dep2})
+        self.client.snapshots.delete(dep)
+        self._delete(dep)
+        self._delete(dep2)
