@@ -109,6 +109,8 @@ class TestEnvironment(object):
         self._manager_blueprint_path = None
         self._workdir = tempfile.mkdtemp(prefix='cloudify-testenv-')
 
+        import ipdb; ipdb.set_trace()
+
         if HANDLER_CONFIGURATION not in os.environ:
             raise RuntimeError('handler configuration name must be configured '
                                'in "HANDLER_CONFIGURATION" env variable')
@@ -202,6 +204,9 @@ class TestEnvironment(object):
         return self
 
     def bootstrap(self, task_retries=5):
+
+        import ipdb; ipdb.set_trace()
+
         if self._management_running:
             return
 
@@ -228,7 +233,7 @@ class TestEnvironment(object):
         cfy = CfyHelper(cfy_workdir=self._workdir)
         try:
             cfy.use(self.management_ip)
-            cfy.teardown(verbose=True)
+            cfy.teardown(verbose=False)
         finally:
             self._global_cleanup_context.cleanup()
             self.handler.after_teardown()

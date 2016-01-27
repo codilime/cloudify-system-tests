@@ -27,12 +27,18 @@ from cosmo_tester.framework.util import create_rest_client, YamlPatcher
 from cosmo_tester.test_suites.test_blueprints.hello_world_bash_test import (
     HelloWorldBashTest)
 
+#import sys
+#from IPython.core import ultratb
+#
+#sys.excepthook = ultratb.FormattedTB(mode='Verbose',
+#     color_scheme='Linux', call_pdb=1)
 
 def setUp():
     bootstrap()
 
 
 def tearDown():
+    #import ipdb; ipdb.set_trace()
     teardown()
 
 
@@ -44,6 +50,9 @@ class TwoManagersTest(HelloWorldBashTest):
     the second manager, checks whether helloworld is not running indeed and
     tears down those managers.
     """
+
+    def assert_monitoring_data_exists(self):
+        pass
 
     def setUp(self):
         super(TwoManagersTest, self).setUp()
@@ -142,6 +151,7 @@ class TwoManagersTest(HelloWorldBashTest):
             os.remove(snapshot_file_path)
         self.logger.info('Snapshot file removed.')
 
+        #import ipdb; ipdb.set_trace()
         self.logger.info('Restoring snapshot...')
         self._restore_snapshot(self.client2, self.test_id)
         try:

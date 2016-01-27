@@ -24,6 +24,9 @@ deploy_ssl_certificate () {
 
   if [[ ${private_or_public} == "private" ]]; then
     # This check should probably be done using an openssl command
+    echo "THIS IS CERT:"
+    echo "${cert}"
+    echo "END OF CERT"
     if [[ "${cert}" =~ "PRIVATE KEY" ]]; then
       # Owner read, Group read, Others no access
       permissions=440

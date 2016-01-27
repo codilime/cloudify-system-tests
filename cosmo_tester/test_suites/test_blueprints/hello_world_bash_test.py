@@ -15,6 +15,7 @@
 
 
 import requests
+from time import sleep
 from neutronclient.common.exceptions import NeutronException
 from novaclient.exceptions import NotFound
 from retrying import retry
@@ -50,6 +51,9 @@ class AbstractHelloWorldTest(MonitoringTestCase):
              is_existing_deployment=False,
              influx_host_ip=None,
              after_install=None):
+
+        #import ipdb; ipdb.set_trace()
+
         if not is_existing_deployment:
             self.repo_dir = clone_hello_world(self.workdir)
             self.blueprint_yaml = self.repo_dir / blueprint_file
@@ -78,6 +82,7 @@ class AbstractHelloWorldTest(MonitoringTestCase):
         context = self._do_post_install_assertions()
 
         self.logger.info('Asserting deployment monitoring data exists...')
+        #import ipdb; ipdb.set_trace()
         self.assert_deployment_monitoring_data_exists(
             influx_host_ip=influx_host_ip)
 
@@ -118,18 +123,20 @@ class HelloWorldBashTest(AbstractHelloWorldTest):
             'flavor': self.env.flavor_name
         }
 
-        def after_install():
-            # Some CentOS 6.X images seem to have a firewall
-            # enabled by default (e.g. datacentred).
-            # We need port 8080 to assert the web application is active,
-            # so we walk the easy route and disable the entire firewall.
-            self.run_commands_on_agent_host(
-                compute_node_id='vm',
-                user=agent_user,
-                commands=['sudo service iptables save',
-                          'sudo service iptables stop',
-                          'sudo chkconfig iptables off'])
-        self._run(inputs=inputs, after_install=after_install)
+        # def after_install():
+        #     # Some CentOS 6.X images seem to have a firewall
+        #     # enabled by default (e.g. datacentred).
+        #     # We need port 8080 to assert the web application is active,
+        #     # so we walk the easy route and disable the entire firewall.
+        #     self.run_commands_on_agent_host(
+        #         compute_node_id='vm',
+        #         user=agent_user,
+        #         commands=['sudo service iptables save',
+        #                   'sudo service iptables stop',
+        #                   'sudo chkconfig iptables off'])
+        # self._run(inputs=inputs, after_install=after_install)
+
+        self._run(inputs=inputs)
 
     def _do_post_install_assertions(self):
         (floatingip_node, security_group_node, server_node) = self._instances()
@@ -177,7 +184,7 @@ class HelloWorldBashTest(AbstractHelloWorldTest):
         self.assertEquals(0, len(security_group_node.runtime_properties))
         # CFY-2670 - diamond plugin leaves one runtime property at this time
         self.assertLessEqual(set(server_node.runtime_properties.keys()),
-                             {'diamond_paths', 'old_cloudify_agent'})
+                             {'agent_status', 'diamond_paths', 'old_cloudify_agent'})
 
 
 @retry(stop_max_attempt_number=10, wait_fixed=5000)
@@ -185,10 +192,19 @@ def verify_webserver_running(http_endpoint):
     """
     This method is also used by two_deployments_test!
     """
+    #import ipdb; ipdb.set_trace()
+
+    sleep(60)
+
+    #try:
     server_response = requests.get(http_endpoint, timeout=15)
     if server_response.status_code != 200:
         raise AssertionError('Unexpected status code: {}'
                              .format(server_response.status_code))
+    #except:
+    #    pass
+
+    #import ipdb; ipdb.set_trace()
 
 
 def get_instances(client, deployment_id):

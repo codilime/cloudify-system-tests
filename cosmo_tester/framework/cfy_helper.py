@@ -131,6 +131,7 @@ class CfyHelper(object):
             execute_timeout=DEFAULT_EXECUTE_TIMEOUT,
             inputs=None):
         with self.workdir:
+            #import ipdb; ipdb.set_trace()
             self.upload_blueprint(
                 blueprint_path=blueprint_path,
                 blueprint_id=blueprint_id,
