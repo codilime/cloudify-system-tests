@@ -218,6 +218,7 @@ class PuppetPluginStandaloneTest(TestCase):
         page = requests.get('http://{0}:8080'.format(puppet_standalone_ip))
         self.assertIn('Cloudify Hello World', page.text,
                       'Expected text not found in response')
+        self.wait_until_all_deployment_executions_end(include_system_workflows=True)
         self.execute_uninstall(id_)
 
     def test_puppet_standalone_without_download(self):
