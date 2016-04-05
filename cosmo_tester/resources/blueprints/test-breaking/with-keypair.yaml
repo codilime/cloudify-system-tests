@@ -1,0 +1,46 @@
+tosca_definitions_version: cloudify_dsl_1_2
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/3.4m4/types.yaml
+  - http://www.getcloudify.org/spec/openstack-plugin/1.3.1/plugin.yaml
+
+plugins:
+  foo:
+    executor: host_agent
+    source: foo
+
+inputs:
+  key_pair_path:
+    type: string
+  os_username:
+    type: string
+  os_password:
+    type: string
+  os_tenant_name:
+    type: string
+  os_auth_url:
+    type: string
+  os_region:
+    type: string
+  prefix:
+    type: string
+
+node_templates:
+
+  keypair:
+    type: cloudify.openstack.nodes.KeyPair
+    properties:
+      resource_id: {concat: [{get_input: prefix}, '-keypair']}
+      private_key_path: { get_input: key_pair_path }
+      openstack_config: &OPENSTACK_CONFIG
+        username: { get_input: os_username }
+        password: { get_input: os_password }
+        tenant_name: { get_input: os_tenant_name }
+        auth_url: { get_input: os_auth_url }
+        region: { get_input: os_region }
+
+    interfaces:
+      cloudify.interfaces.monitoring:
+        start:
+          implementation: scripts/break.py
+          executor: central_deployment_agent
