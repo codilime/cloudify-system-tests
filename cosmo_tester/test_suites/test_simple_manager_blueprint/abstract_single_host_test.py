@@ -59,6 +59,7 @@ class AbstractSingleHostTest(object):
             ignored_modules=cli_constants.IGNORED_LOCAL_WORKFLOW_MODULES)
 
         self.logger.info('starting vm to serve as the management vm')
+        self.addCleanup(self.uninstall_client)
         self.local_env.execute('install',
                                task_retries=10,
                                task_retry_interval=30)
@@ -66,9 +67,6 @@ class AbstractSingleHostTest(object):
             self.local_env.outputs()['simple_vm_public_ip_address']
         self.private_ip_address = \
             self.local_env.outputs()['simple_vm_private_ip_address']
-
-        self.addCleanup(self.clear_management_ip)
-        self.addCleanup(self.uninstall_client)
 
     def bootstrap_simple_manager_blueprint(self, override_inputs=None):
         self.manager_blueprints_repo_dir = clone(MANAGER_BLUEPRINTS_REPO_URL,
@@ -104,12 +102,13 @@ class AbstractSingleHostTest(object):
                            self.remote_manager_key_path)
 
     def _bootstrap(self):
+        self.addCleanup(self.cfy.teardown)
         self.cfy.bootstrap(blueprint_path=self.test_manager_blueprint_path,
                            inputs_file=self.test_inputs_path,
                            task_retries=5)
-        self.addCleanup(self.cfy.teardown)
 
     def _running_env_setup(self, management_ip):
+        self.addCleanup(self.clear_management_ip)
         self.env.management_ip = management_ip
         self.client = create_rest_client(management_ip)
         response = self.client.manager.get_status()
