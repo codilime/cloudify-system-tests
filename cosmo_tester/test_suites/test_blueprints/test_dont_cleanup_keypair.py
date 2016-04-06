@@ -54,6 +54,8 @@ class BreakingTest(TestCase):
             inputs=self.inputs,
             name=self._testMethodName,
             ignored_modules=cli_constants.IGNORED_LOCAL_WORKFLOW_MODULES)
+        self.addCleanup(self.env.handler.remove_keypair,
+            self.inputs['prefix'] + '-keypair')
 
         self.local_env.execute('install', task_retries=0)
         self.addCleanup(self.uninstall)
