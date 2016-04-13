@@ -1,0 +1,33 @@
+tosca_definitions_version: cloudify_dsl_1_0
+
+inputs:
+    fabric_env:      {}
+    commands:        {}
+    ip: {}
+
+node_templates:
+    test:
+        type: cloudify.nodes.Compute
+        properties:
+            ip: { get_input: ip }
+        interfaces:
+            test:
+                run_commands:
+                    implementation: fabric.fabric_plugin.tasks.run_commands
+                    inputs:
+                        commands:        { get_input: commands   }
+                        fabric_env:      { get_input: fabric_env }
+
+workflows:
+    execute_operation:
+        mapping: fabric.fabric_plugin.tests.tests.execute_operation
+        parameters: { operation: {} }
+
+plugins:
+    fabric:
+        executor: central_deployment_agent
+        install: false
+
+node_types:
+    cloudify.nodes.Compute:
+        properties: { ip: {} }
