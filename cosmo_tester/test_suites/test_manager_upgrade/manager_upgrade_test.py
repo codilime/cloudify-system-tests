@@ -73,7 +73,7 @@ class ManagerUpgradeTest(TestCase):
 
             # shared settings
             'manager_public_key_name': 'tt1-key',
-            'agent_public_key_name': 'tt1-key',
+            'agent_public_key_name': 'tt2-key',
             'ssh_key_filename': os.path.join(self.workdir, 'tt1.key'),
             'agent_private_key_path': os.path.join(self.workdir, 'tt2.key'),
 
@@ -89,6 +89,9 @@ class ManagerUpgradeTest(TestCase):
             'manager_port_name': manager_name + '-port',
             'management_subnet_dns_nameservers': ['8.8.8.8']
         }
+        self.addCleanup(self.env.handler.remove_keypair, 'tt1-key')
+        self.addCleanup(os.unlink, bootstrap_inputs['ssh_key_filename'])
+        self.addCleanup(os.unlink, bootstrap_inputs['agent_private_key_path'])
 
         self.source_manager_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
         self.source_cfy = CfyHelper(cfy_workdir=self.source_manager_dir)
