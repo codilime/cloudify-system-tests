@@ -389,20 +389,23 @@ class CfyHelper(object):
     def upgrade_manager(self, blueprint_path, inputs_file=None):
         if not inputs_file:
             inputs_file = self._get_inputs_in_temp_file({}, 'manager')
+        with self.workdir:
+            cfy.upgrade(
+                blueprint_path=blueprint_path,
+                inputs=inputs_file).wait()
 
-        cfy.upgrade(
-            blueprint_path=blueprint_path,
-            inputs=inputs_file).wait()
+    def rollback_manager(self, blueprint_path, inputs_file=None):
+        if not inputs_file:
+            inputs_file = self._get_inputs_in_temp_file({}, 'manager')
+        with self.workdir:
+            cfy.rollback(
+                blueprint_path=blueprint_path,
+                inputs=inputs_file).wait()
 
     def set_maintenance_mode(self, activate):
         maintenance_handler = cfy.bake('maintenance-mode')
-        if activate:
-            maintenance_handler.activate().wait()
-        else:
-            maintenance_handler.deactivate().wait()
-
-    @contextmanager
-    def maintenance_mode(self):
-        self.set_maintenance_mode(True)
-        yield
-        self.set_maintenance_mode(False)
+        with self.workdir:
+            if activate:
+                maintenance_handler.activate(wait=True).wait()
+            else:
+                maintenance_handler.deactivate().wait()

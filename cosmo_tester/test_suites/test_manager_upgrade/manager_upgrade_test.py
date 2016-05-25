@@ -15,7 +15,9 @@
 
 
 import os
+import time
 import shutil
+import socket
 import tempfile
 
 from cosmo_tester.framework.testenv import TestCase
@@ -32,20 +34,22 @@ def setUp():
 def tearDown():
     clear_environment()
 
-MANAGER_BLUEPRINTS_REPO_URL = 'https://github.com/cloudify-cosmo/' \
+MANAGER_BLUEPRINTS_REPO_URL = 'https://github.com/codilime/' \
                               'cloudify-manager-blueprints.git'
-SOURCE_BRANCH = 'master'
+SOURCE_BRANCH = 'restservice-test-endpoint'
+UPGRADE_BRANCH = 'restservice-test-endpoint'
 
 
 class ManagerUpgradeTest(TestCase):
 
     def test_manager_upgrade(self):
-        import pudb; pu.db
+        import pudb; pu.db  # NOQA
         self.prepare_manager()
         # self.deploy_hello_world()
-        self.upgrade_manager()
-        self.uninstall_deployment()
-        self.teardown_manager()
+        # self.upgrade_manager()
+        # self.uninstall_deployment()
+        # self.teardown_manager()
+        self.rollback_manager()
 
     def prepare_manager(self):
         self.manager_inputs = self._get_bootstrap_inputs()
@@ -103,7 +107,6 @@ class ManagerUpgradeTest(TestCase):
             'management_subnet_dns_nameservers': ['8.8.8.8']
         }
 
-
     def bootstrap_manager(self):
         source_manager_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
         # self.addCleanup(shutil.rmtree, source_manager_repo_dir)
@@ -116,7 +119,8 @@ class ManagerUpgradeTest(TestCase):
         # self.addCleanup(self.env.handler.remove_keypair, 'tt1-key')
         # self.addCleanup(self.env.handler.remove_keypair, 'tt2-key')
         # self.addCleanup(os.unlink, self.bootstrap_inputs['ssh_key_filename'])
-        # self.addCleanup(os.unlink, self.bootstrap_inputs['agent_private_key_path'])
+        # self.addCleanup(os.unlink,
+        #            self.bootstrap_inputs['agent_private_key_path'])
 
         self.source_manager_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
         # self.addCleanup(shutil.rmtree, self.source_manager_dir)
@@ -124,6 +128,12 @@ class ManagerUpgradeTest(TestCase):
         self.inputs_path = self.source_cfy._get_inputs_in_temp_file(
             self.manager_inputs, self._testMethodName)
         self.source_cfy.bootstrap(blueprint_path, inputs_file=self.inputs_path)
+        self.upgrade_manager_ip = self.source_cfy.get_management_ip()
+        self.source_cfy.use(management_ip=self.upgrade_manager_ip)  # ???
+
+        group_name = self.manager_inputs['manager_security_group_name']
+        for port in [5672, 8086, 9200]:
+            self._allow_port_on_security_group(group_name, port)
 
     def deploy_hello_world(self):
         hello_repo_path = clone(
@@ -147,22 +157,46 @@ class ManagerUpgradeTest(TestCase):
         target_manager_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
         self.addCleanup(shutil.rmtree, target_manager_repo_dir)
         self.target_manager_repo_dir = clone(MANAGER_BLUEPRINTS_REPO_URL,
-                                             target_manager_repo_dir)
+                                             target_manager_repo_dir,
+                                             branch=UPGRADE_BRANCH)
         target_manager_blueprint = os.path.join(
             self.target_manager_repo_dir, 'simple-manager-blueprint.yaml')
 
         upgrade_inputs = {
             'private_ip': self.upgrade_manager_ip,
+            'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
         }
         upgrade_inputs_file = self.source_cfy._get_inputs_in_temp_file(
             upgrade_inputs, self._testMethodName)
 
-        with self.source_cfy.maintenance_mode():
-            self.source_cfy.upgrade_manager(
-                blueprint_path=target_manager_blueprint,
-                inputs_file=upgrade_inputs_file)
+        self.source_cfy.set_maintenance_mode(True)
+        self.source_cfy.upgrade_manager(
+            blueprint_path=target_manager_blueprint,
+            inputs_file=upgrade_inputs_file)
+        self.source_cfy.set_maintenance_mode(False)
+
+    def rollback_manager(self):
+        rollback_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
+        rollback_repo_dir = clone(MANAGER_BLUEPRINTS_REPO_URL,
+                                  rollback_repo_dir,
+                                  branch=UPGRADE_BRANCH)
+        target_manager_blueprint = os.path.join(
+            rollback_repo_dir, 'simple-manager-blueprint.yaml')
+
+        rollback_inputs = {
+            'private_ip': self.upgrade_manager_ip,
+            'public_ip': self.upgrade_manager_ip,
+            'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
+            'ssh_user': self.manager_inputs['ssh_user'],
+        }
+        rollback_inputs_file = self.source_cfy._get_inputs_in_temp_file(
+            rollback_inputs, self._testMethodName)
+        self.source_cfy.set_maintenance_mode(True)
+        self.source_cfy.rollback_manager(
+            blueprint_path=target_manager_blueprint,
+            inputs_file=rollback_inputs_file)
 
     def uninstall_deployment(self):
         self.source_cfy.executions.start(workflow='uninstall',
@@ -171,3 +205,31 @@ class ManagerUpgradeTest(TestCase):
     def teardown_manager(self):
         self.source_cfy.teardown(ignore_deployments=True,
                                  force=True).wait()
+
+    def _allow_port_on_security_group(self, group_name, port, proto='tcp'):
+        nova, neutron, cinder = self.env.handler.openstack_clients()
+        group_id = nova.security_groups.find(name=group_name).id
+
+        nova.security_group_rules.create(
+            parent_group_id=group_id,
+            from_port=port,
+            to_port=port,
+            ip_protocol=proto,
+        )
+        # Don't continue until the rule is actually active
+        for attempt in range(1, 4):
+            try:
+                socket.create_connection((
+                    self.upgrade_manager_ip,
+                    port
+                ))
+            except socket.error:
+                # Port is not yet active
+                if attempt == 3:
+                    # Maximum attempts reached, something is probably wrong
+                    raise
+                else:
+                    # Try again soon
+                    time.sleep(3)
+            else:
+                break
