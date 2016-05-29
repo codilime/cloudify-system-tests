@@ -25,6 +25,9 @@ from cosmo_tester.framework.git_helper import clone
 from cosmo_tester.framework.cfy_helper import CfyHelper
 from cosmo_tester.framework.testenv import (initialize_without_bootstrap,
                                             clear_environment)
+from cosmo_tester.framework.util import create_rest_client
+
+from influxdb import InfluxDBClient
 
 
 def setUp():
@@ -34,44 +37,84 @@ def setUp():
 def tearDown():
     clear_environment()
 
-MANAGER_BLUEPRINTS_REPO_URL = 'https://github.com/codilime/' \
-                              'cloudify-manager-blueprints.git'
-SOURCE_BRANCH = 'restservice-test-endpoint'
-UPGRADE_BRANCH = 'restservice-test-endpoint'
+BOOTSTRAP_REPO_URL = 'https://github.com/cloudify-cosmo/'\
+                     'cloudify-manager-blueprints.git'
+BOOTSTRAP_BRANCH = '3.4m5'
+
+UPGRADE_REPO_URL = 'https://github.com/codilime/' \
+                   'cloudify-manager-blueprints.git'
+UPGRADE_BRANCH = 'fixup-upgrade'
 
 
 class ManagerUpgradeTest(TestCase):
 
+    # TODO check if we want to separate openstack and base testcases
+    # so that we can also have an aws-based test etc
+
     def test_manager_upgrade(self):
         import pudb; pu.db  # NOQA
         self.prepare_manager()
-        # self.deploy_hello_world()
-        self.upgrade_manager()
-        # self.uninstall_deployment()
-        self.rollback_manager()
+
+        self.post_bootstrap_checks()
+
+        deployment_id = self.deploy_hello_world()
+        upgrade_blueprint_path = self.get_upgrade_blueprint()
+
+        self.upgrade_manager(upgrade_blueprint_path)
+        self.post_upgrade_checks(deployment_id)
+
+        self.uninstall_deployment(deployment_id)
+        self.rollback_manager(upgrade_blueprint_path)
+
+        self.post_rollback_checks()
+
         self.teardown_manager()
+
+    @property
+    def _use_existing(self):
+        return 'upgrade_manager_ip' in self.env.handler_configuration
+
+    def make_cfy(self, workdir=None):
+        # TODO: perhaps need to use a separate cfy checkout? so cli version
+        # is the same as the manager version (pre/post-ugprade)
+        # TODO: or maybe need a ---skip-version-check
+        if workdir is None:
+            workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
+            self.addCleanup(shutil.rmtree, workdir)
+        return CfyHelper(cfy_workdir=workdir)
+
+    def load_existing_manager(self):
+            self.upgrade_manager_ip = \
+                self.env.handler_configuration['upgrade_manager_ip']
+            self.manager_cfy = self.make_cfy()
+            self.manager_cfy.use(self.upgrade_manager_ip)
 
     def prepare_manager(self):
         self.manager_inputs = self._get_bootstrap_inputs()
-        if 'foo_manager' in self.env.handler_configuration:
-            self.source_manager_dir = tempfile.mkdtemp(
-                prefix='cloudify-testenv-')
-            self.source_cfy = CfyHelper(cfy_workdir=self.source_manager_dir)
-            self.source_cfy.use(
-                management_ip=self.env.handler_configuration['foo_manager'])
-            self.upgrade_manager_ip = \
-                self.env.handler_configuration['foo_manager']
+        if self._use_existing:
+            self.load_existing_manager()
         else:
-            self.bootstrap_manager()
+            blueprint_path = self.get_bootstrap_blueprint()
+            self.bootstrap_manager(blueprint_path)
+
+        self.rest_client = create_rest_client(self.upgrade_manager_ip)
 
     def _get_bootstrap_inputs(self):
-        if 'foo_manager' in self.env.handler_configuration:
-            ssh_key_filename = self.env.handler_configuration['foo_key']
-        else:
-            ssh_key_filename = os.path.join(self.workdir, 'tt1.key')
+        prefix = self.test_id
 
-        agent_key_path = os.path.join(self.workdir, 'tt2.key')
-        manager_name = self.test_id + '-manager-33'
+        if self._use_existing:
+            ssh_key_filename = self.env.handler_configuration[
+                'upgrade_manager_key']
+        else:
+            ssh_key_filename = os.path.join(self.workdir, 'manager.key')
+            self.addCleanup(os.unlink, ssh_key_filename)
+            self.addCleanup(self.env.handler.remove_keypair,
+                            prefix + '-manager-key')
+
+        agent_key_path = os.path.join(self.workdir, 'agents.key')
+        self.addCleanup(os.onlink, agent_key_path)
+        self.addCleanup(self.env.handler.remove_keypair,
+                        prefix + '-agents-key')
 
         return {
             'keystone_username': self.env.keystone_username,
@@ -84,85 +127,100 @@ class ManagerUpgradeTest(TestCase):
 
             'ssh_user': self.env.centos_7_image_user,
             'external_network_name': self.env.external_network_name,
-            'resources_prefix': self.env.resources_prefix,
+            'resources_prefix': 'test-upgrade-',
 
-            'manager_server_name': manager_name,
+            'manager_server_name': prefix + '-manager',
 
             # shared settings
-            'manager_public_key_name': 'tt1-manager-key',
-            'agent_public_key_name': 'tt1-agents-key',
+            'manager_public_key_name': prefix + '-manager-key',
+            'agent_public_key_name': prefix + '-agents-key',
             'ssh_key_filename': ssh_key_filename,
             'agent_private_key_path': agent_key_path,
 
-            'management_network_name': 'tt1-network',
-            'management_subnet_name': 'tt1-subnet',
-            'management_router': 'tt1-router',
+            'management_network_name': prefix + '-network',
+            'management_subnet_name': prefix + '-subnet',
+            'management_router': prefix + '-router',
 
             'agents_user': '',
 
             # private settings
-            'manager_security_group_name': manager_name + '-m-sg',
-            'agents_security_group_name': manager_name + '-a-sg',
-            'manager_port_name': manager_name + '-port',
-            'management_subnet_dns_nameservers': ['8.8.8.8']
+            'manager_security_group_name': prefix + '-m-sg',
+            'agents_security_group_name': prefix + '-a-sg',
+            'manager_port_name': prefix + '-port',
+            'management_subnet_dns_nameservers': ['8.8.8.8', '8.8.4.4']
         }
 
-    def bootstrap_manager(self):
-        source_manager_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
-        # self.addCleanup(shutil.rmtree, source_manager_repo_dir)
-        self.source_manager_repo_dir = clone(MANAGER_BLUEPRINTS_REPO_URL,
-                                             source_manager_repo_dir,
-                                             branch=SOURCE_BRANCH)
-        blueprint_path = os.path.join(self.source_manager_repo_dir,
-                                      'openstack-manager-blueprint.yaml')
+    def get_bootstrap_blueprint(self):
+        manager_repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
+        self.addCleanup(shutil.rmtree, manager_repo_dir)
+        manager_repo = clone(BOOTSTRAP_REPO_URL,
+                             manager_repo_dir,
+                             branch=BOOTSTRAP_BRANCH)
+        return os.path.join(manager_repo, 'openstack-manager-blueprint.yaml')
 
-        # self.addCleanup(self.env.handler.remove_keypair, 'tt1-key')
-        # self.addCleanup(self.env.handler.remove_keypair, 'tt2-key')
-        # self.addCleanup(os.unlink, self.bootstrap_inputs['ssh_key_filename'])
-        # self.addCleanup(os.unlink,
-        #            self.bootstrap_inputs['agent_private_key_path'])
-
-        self.source_manager_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
-        # self.addCleanup(shutil.rmtree, self.source_manager_dir)
-        self.source_cfy = CfyHelper(cfy_workdir=self.source_manager_dir)
-        self.inputs_path = self.source_cfy._get_inputs_in_temp_file(
+    def bootstrap_manager(self, blueprint_path):
+        self.manager_cfy = self.make_cfy()
+        inputs_path = self.manager_cfy._get_inputs_in_temp_file(
             self.manager_inputs, self._testMethodName)
-        self.source_cfy.bootstrap(blueprint_path, inputs_file=self.inputs_path)
-        self.upgrade_manager_ip = self.source_cfy.get_management_ip()
-        self.source_cfy.use(management_ip=self.upgrade_manager_ip)  # ???
+        self.manager_cfy.bootstrap(blueprint_path,
+                                   inputs_file=inputs_path)
+        self.upgrade_manager_ip = self.manager_cfy.get_management_ip()
 
-        group_name = self.manager_inputs['manager_security_group_name']
-        for port in [5672, 8086, 9200]:
-            self._allow_port_on_security_group(group_name, port)
+        # TODO: why is this needed?
+        self.manager_cfy.use(management_ip=self.upgrade_manager_ip)
+
+        # this is so we can query influxdb, to check if the agents are still
+        # reporting to the manager after an upgrade
+        self._allow_port_on_security_group(
+            self.manager_inputs['manager_security_group_name'], 8086)
+
+    def post_bootstrap_checks(self):
+        self.rest_client.blueprints.list()
 
     def deploy_hello_world(self):
+        blueprint_name = self.test_id
+        deployment_name = self.test_id
+        hello_repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
         hello_repo_path = clone(
             'https://github.com/cloudify-cosmo/'
             'cloudify-hello-world-example.git',
-            self.source_manager_dir
+            hello_repo_dir
         )
+
         hello_blueprint_path = os.path.join(hello_repo_path, 'blueprint.yaml')
-        self.source_cfy.upload_blueprint('hw1', hello_blueprint_path)
-        self.addCleanup(self.source_cfy.delete_blueprint, 'hw1')
+        self.manager_cfy.upload_blueprint(blueprint_name, hello_blueprint_path)
+        self.addCleanup(self.manager_cfy.delete_blueprint, blueprint_name)
+
+        # TODO if we separate base/openstack test case, this also needs to be
+        # outside
         inputs = {
             'agent_user': self.env.cloudify_agent_user,
             'image': self.env.ubuntu_trusty_image_name,
             'flavor': self.env.flavor_name
         }
-        self.source_cfy.create_deployment('hw1', 'hw1', inputs=inputs)
-        self.addCleanup(self.source_cfy.delete_deployment, 'hw1')
-        self.source_cfy.execute_install(deployment_id='hw1')
+        self.manager_cfy.create_deployment(blueprint_name, deployment_name,
+                                           inputs=inputs)
+        self.addCleanup(self.manager_cfy.delete_deployment, deployment_name)
 
-    def upgrade_manager(self):
-        target_manager_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
-        self.addCleanup(shutil.rmtree, target_manager_repo_dir)
-        self.target_manager_repo_dir = clone(MANAGER_BLUEPRINTS_REPO_URL,
-                                             target_manager_repo_dir,
-                                             branch=UPGRADE_BRANCH)
-        target_manager_blueprint = os.path.join(
-            self.target_manager_repo_dir, 'simple-manager-blueprint.yaml')
+        # TODO uninstall in cleanup (separate method with check?)
+        self.manager_cfy.execute_install(deployment_id=deployment_name)
+
+    def get_upgrade_blueprint(self):
+        repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
+        self.addCleanup(shutil.rmtree, repo_dir)
+        upgrade_blueprint_path = clone(UPGRADE_REPO_URL,
+                                       repo_dir,
+                                       branch=UPGRADE_BRANCH)
+
+        # TODO: this uses a simple blueprint, is that right?
+        return os.path.join(
+            upgrade_blueprint_path, 'simple-manager-blueprint.yaml')
+
+    def upgrade_manager(self, upgrade_blueprint):
 
         upgrade_inputs = {
+            # TODO: 127.0.0.1? should use openstack output probably
+            # after cfy-5332 gets merged
             'private_ip': '127.0.0.1',
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
@@ -170,44 +228,61 @@ class ManagerUpgradeTest(TestCase):
             'elasticsearch_endpoint_port': 9200
 
         }
-        upgrade_inputs_file = self.source_cfy._get_inputs_in_temp_file(
+        upgrade_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
             upgrade_inputs, self._testMethodName)
 
-        self.source_cfy.set_maintenance_mode(True)
-        self.source_cfy.upgrade_manager(
-            blueprint_path=target_manager_blueprint,
+        self.manager_cfy.set_maintenance_mode(True)
+        self.manager_cfy.upgrade_manager(
+            blueprint_path=upgrade_blueprint,
             inputs_file=upgrade_inputs_file)
-        # self.source_cfy.set_maintenance_mode(False)
 
-    def rollback_manager(self):
-        rollback_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
-        rollback_repo_dir = clone(MANAGER_BLUEPRINTS_REPO_URL,
-                                  rollback_repo_dir,
-                                  branch=UPGRADE_BRANCH)
-        target_manager_blueprint = os.path.join(
-            rollback_repo_dir, 'simple-manager-blueprint.yaml')
+    def post_upgrade_checks(self, deployment_id):
+        self.rest_client.blueprints.list()
+        self.check_influx(deployment_id)
 
+    def check_influx(self, deployment_id):
+        # TODO influx config should be pulled from props?
+        influx_client = InfluxDBClient(self.upgrade_manager_ip, 8086,
+                                       'root', 'root', 'cloudify')
+        try:
+            result = influx_client.query('select * from /^{0}\./i '
+                                         'where time > now() - 5s'
+                                         .format(deployment_id))
+        except NameError as e:
+            self.fail('monitoring events list for deployment with ID {0} were'
+                      ' not found on influxDB. error is: {1}'
+                      .format(deployment_id, e))
+
+        self.assertTrue(len(result) > 0)
+
+    def rollback_manager(self, rollback_blueprint):
         rollback_inputs = {
             'private_ip': '127.0.0.1',
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
         }
-        rollback_inputs_file = self.source_cfy._get_inputs_in_temp_file(
+        rollback_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
             rollback_inputs, self._testMethodName)
-        self.source_cfy.set_maintenance_mode(True)
-        self.source_cfy.rollback_manager(
-            blueprint_path=target_manager_blueprint,
+        self.manager_cfy.set_maintenance_mode(True)
+        self.manager_cfy.rollback_manager(
+            blueprint_path=rollback_blueprint,
             inputs_file=rollback_inputs_file)
 
-    def uninstall_deployment(self):
-        self.source_cfy.executions.start(workflow='uninstall',
-                                         deployment_id='hw1').wait()
+    def post_rollback_checks(self):
+        pass
+
+    def uninstall_deployment(self, deployment_id):
+        self.manager_cfy.executions.start(workflow='uninstall',
+                                          deployment_id=deployment_id).wait()
 
     def teardown_manager(self):
-        self.source_cfy.teardown(ignore_deployments=True).wait()
+        self.manager_cfy.teardown(ignore_deployments=True).wait()
 
     def _allow_port_on_security_group(self, group_name, port, proto='tcp'):
+        # TODO this is copied from secured_broker_test, probably should
+        # either factor this out, or instead use YamlPatcher to allow the ports
+        # on the blueprint
         nova, neutron, cinder = self.env.handler.openstack_clients()
         group_id = nova.security_groups.find(name=group_name).id
 
