@@ -46,10 +46,10 @@ class ManagerUpgradeTest(TestCase):
         import pudb; pu.db  # NOQA
         self.prepare_manager()
         # self.deploy_hello_world()
-        # self.upgrade_manager()
+        self.upgrade_manager()
         # self.uninstall_deployment()
-        # self.teardown_manager()
         self.rollback_manager()
+        self.teardown_manager()
 
     def prepare_manager(self):
         self.manager_inputs = self._get_bootstrap_inputs()
@@ -163,10 +163,12 @@ class ManagerUpgradeTest(TestCase):
             self.target_manager_repo_dir, 'simple-manager-blueprint.yaml')
 
         upgrade_inputs = {
-            'private_ip': self.upgrade_manager_ip,
+            'private_ip': '127.0.0.1',
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
+            'elasticsearch_endpoint_port': 9200
+
         }
         upgrade_inputs_file = self.source_cfy._get_inputs_in_temp_file(
             upgrade_inputs, self._testMethodName)
@@ -175,7 +177,7 @@ class ManagerUpgradeTest(TestCase):
         self.source_cfy.upgrade_manager(
             blueprint_path=target_manager_blueprint,
             inputs_file=upgrade_inputs_file)
-        self.source_cfy.set_maintenance_mode(False)
+        # self.source_cfy.set_maintenance_mode(False)
 
     def rollback_manager(self):
         rollback_repo_dir = tempfile.mkdtemp(prefix='cloudify-testenv-')
@@ -186,7 +188,7 @@ class ManagerUpgradeTest(TestCase):
             rollback_repo_dir, 'simple-manager-blueprint.yaml')
 
         rollback_inputs = {
-            'private_ip': self.upgrade_manager_ip,
+            'private_ip': '127.0.0.1',
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
@@ -203,8 +205,7 @@ class ManagerUpgradeTest(TestCase):
                                          deployment_id='hw1').wait()
 
     def teardown_manager(self):
-        self.source_cfy.teardown(ignore_deployments=True,
-                                 force=True).wait()
+        self.source_cfy.teardown(ignore_deployments=True).wait()
 
     def _allow_port_on_security_group(self, group_name, port, proto='tcp'):
         nova, neutron, cinder = self.env.handler.openstack_clients()
