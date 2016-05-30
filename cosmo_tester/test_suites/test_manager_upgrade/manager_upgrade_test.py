@@ -13,19 +13,18 @@
 #    * See the License for the specific language governing permissions and
 #    * limitations under the License.
 
-
+import json
 import os
-import time
 import shutil
-import socket
 import tempfile
+import urllib2
 
 from cosmo_tester.framework.testenv import TestCase
 from cosmo_tester.framework.git_helper import clone
 from cosmo_tester.framework.cfy_helper import CfyHelper
 from cosmo_tester.framework.testenv import (initialize_without_bootstrap,
                                             clear_environment)
-from cosmo_tester.framework.util import create_rest_client
+from cosmo_tester.framework.util import create_rest_client, YamlPatcher
 
 from influxdb import InfluxDBClient
 
@@ -36,6 +35,7 @@ def setUp():
 
 def tearDown():
     clear_environment()
+
 
 BOOTSTRAP_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                      'cloudify-manager-blueprints.git'
@@ -77,7 +77,7 @@ class ManagerUpgradeTest(TestCase):
     def make_cfy(self, workdir=None):
         # TODO: perhaps need to use a separate cfy checkout? so cli version
         # is the same as the manager version (pre/post-ugprade)
-        # TODO: or maybe need a ---skip-version-check
+        # TODO: or maybe need a --skip-version-check
         if workdir is None:
             workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
             self.addCleanup(shutil.rmtree, workdir)
@@ -112,7 +112,7 @@ class ManagerUpgradeTest(TestCase):
                             prefix + '-manager-key')
 
         agent_key_path = os.path.join(self.workdir, 'agents.key')
-        self.addCleanup(os.onlink, agent_key_path)
+        self.addCleanup(os.unlink, agent_key_path)
         self.addCleanup(self.env.handler.remove_keypair,
                         prefix + '-agents-key')
 
@@ -156,7 +156,18 @@ class ManagerUpgradeTest(TestCase):
         manager_repo = clone(BOOTSTRAP_REPO_URL,
                              manager_repo_dir,
                              branch=BOOTSTRAP_BRANCH)
-        return os.path.join(manager_repo, 'openstack-manager-blueprint.yaml')
+        yaml_path = manager_repo / 'openstack-manager-blueprint.yaml'
+        for port in [8086, 9200, 9900]:
+            secgroup_cfg = [{
+                'port_range_min': port,
+                'port_range_max': port,
+                'remote_ip_prefix': '0.0.0.0/0'
+            }]
+            secgroup_cfg_path = 'node_templates.management_security_group'\
+                '.properties.rules'
+            with YamlPatcher(yaml_path) as patch:
+                patch.append_value(secgroup_cfg_path, secgroup_cfg)
+        return yaml_path
 
     def bootstrap_manager(self, blueprint_path):
         self.manager_cfy = self.make_cfy()
@@ -168,11 +179,6 @@ class ManagerUpgradeTest(TestCase):
 
         # TODO: why is this needed?
         self.manager_cfy.use(management_ip=self.upgrade_manager_ip)
-
-        # this is so we can query influxdb, to check if the agents are still
-        # reporting to the manager after an upgrade
-        self._allow_port_on_security_group(
-            self.manager_inputs['manager_security_group_name'], 8086)
 
     def post_bootstrap_checks(self):
         self.rest_client.blueprints.list()
@@ -213,8 +219,13 @@ class ManagerUpgradeTest(TestCase):
                                        branch=UPGRADE_BRANCH)
 
         # TODO: this uses a simple blueprint, is that right?
-        return os.path.join(
-            upgrade_blueprint_path, 'simple-manager-blueprint.yaml')
+        yaml_path = upgrade_blueprint_path / 'simple-manager-blueprint.yaml'
+        with YamlPatcher(yaml_path) as patch:
+            patch.set_value(
+                ('node_templates.elasticsearch.properties'
+                 '.use_existing_on_upgrade'),
+                False)
+        return yaml_path
 
     def upgrade_manager(self, upgrade_blueprint):
 
@@ -225,7 +236,7 @@ class ManagerUpgradeTest(TestCase):
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
-            'elasticsearch_endpoint_port': 9200
+            'elasticsearch_endpoint_port': 9900
 
         }
         upgrade_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
@@ -239,6 +250,12 @@ class ManagerUpgradeTest(TestCase):
     def post_upgrade_checks(self, deployment_id):
         self.rest_client.blueprints.list()
         self.check_influx(deployment_id)
+        try:
+            response = urllib2.urlopen('http://{0}:{1}'.format(
+                self.upgrade_manager_ip, 9900))
+            json.load(response)
+        except (ValueError, urllib2.URLError):
+            self.fail('elasticsearch isnt listening on the changed port')
 
     def check_influx(self, deployment_id):
         # TODO influx config should be pulled from props?
@@ -278,34 +295,3 @@ class ManagerUpgradeTest(TestCase):
 
     def teardown_manager(self):
         self.manager_cfy.teardown(ignore_deployments=True).wait()
-
-    def _allow_port_on_security_group(self, group_name, port, proto='tcp'):
-        # TODO this is copied from secured_broker_test, probably should
-        # either factor this out, or instead use YamlPatcher to allow the ports
-        # on the blueprint
-        nova, neutron, cinder = self.env.handler.openstack_clients()
-        group_id = nova.security_groups.find(name=group_name).id
-
-        nova.security_group_rules.create(
-            parent_group_id=group_id,
-            from_port=port,
-            to_port=port,
-            ip_protocol=proto,
-        )
-        # Don't continue until the rule is actually active
-        for attempt in range(1, 4):
-            try:
-                socket.create_connection((
-                    self.upgrade_manager_ip,
-                    port
-                ))
-            except socket.error:
-                # Port is not yet active
-                if attempt == 3:
-                    # Maximum attempts reached, something is probably wrong
-                    raise
-                else:
-                    # Try again soon
-                    time.sleep(3)
-            else:
-                break
