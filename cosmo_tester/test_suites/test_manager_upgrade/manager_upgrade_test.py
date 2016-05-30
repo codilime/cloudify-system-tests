@@ -245,9 +245,7 @@ class ManagerUpgradeTest(TestCase):
     def upgrade_manager(self, upgrade_blueprint):
 
         upgrade_inputs = {
-            # TODO: 127.0.0.1? should use openstack output probably
-            # after cfy-5332 gets merged
-            'private_ip': '127.0.0.1',
+            'private_ip': self.manager_private_ip,
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
@@ -292,7 +290,7 @@ class ManagerUpgradeTest(TestCase):
 
     def rollback_manager(self, rollback_blueprint):
         rollback_inputs = {
-            'private_ip': '127.0.0.1',
+            'private_ip': self.manager_private_ip,
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
