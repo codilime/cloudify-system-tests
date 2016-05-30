@@ -248,6 +248,14 @@ class ManagerUpgradeTest(TestCase):
                 inputs_file=upgrade_inputs_file)
 
     def post_upgrade_checks(self):
+        """To check if the upgrade succeeded:
+            - fire a request to the REST service
+            - check that elasticsearch is listening on the changed port
+            - check that the pre-existing deployment still reports to influxdb
+            - install a new deployment, check that it reports to influxdb,
+              and uninstall it: to check that the manager still allows
+              creating, installing and uninstalling deployments correctly
+        """
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9900)
         self.check_influx(self.preupgrade_deployment_id)
