@@ -259,12 +259,7 @@ class ManagerUpgradeTest(TestCase):
 
     def post_upgrade_checks(self, deployment_id):
         self.rest_client.blueprints.list()
-        try:
-            response = urllib2.urlopen('http://{0}:{1}'.format(
-                self.upgrade_manager_ip, 9900))
-            json.load(response)
-        except (ValueError, urllib2.URLError):
-            self.fail('elasticsearch isnt listening on the changed port')
+        self.check_elasticsearch(self.upgrade_manager_ip, 9900)
 
     def check_influx(self, deployment_id):
         # TODO influx config should be pulled from props?
@@ -280,6 +275,17 @@ class ManagerUpgradeTest(TestCase):
                       .format(deployment_id, e))
 
         self.assertTrue(len(result) > 0)
+
+    def check_elasticsearch(self, host, port):
+        try:
+            response = urllib2.urlopen('http://{0}:{1}'.format(
+                self.upgrade_manager_ip, 9200))
+            response = json.load(response)
+            if response['status'] != 200:
+                raise ValueError('Incorrect status {0}'.format(
+                    response['status']))
+        except (ValueError, urllib2.URLError):
+            self.fail('elasticsearch isnt listening on the changed port')
 
     def uninstall_deployment(self, deployment_id):
         self.manager_cfy.execute_uninstall(deployment_id)
@@ -301,12 +307,7 @@ class ManagerUpgradeTest(TestCase):
 
     def post_rollback_checks(self):
         self.rest_client.blueprints.list()
-        try:
-            response = urllib2.urlopen('http://{0}:{1}'.format(
-                self.upgrade_manager_ip, 9200))
-            json.load(response)
-        except (ValueError, urllib2.URLError):
-            self.fail('elasticsearch isnt listening on the changed port')
+        self.check_elasticsearch(self.upgrade_manager_ip, 9200)
 
     def teardown_manager(self):
         self.manager_cfy.teardown(ignore_deployments=True)
