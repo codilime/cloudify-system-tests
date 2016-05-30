@@ -58,14 +58,21 @@ class ManagerUpgradeTest(TestCase):
 
         self.post_bootstrap_checks()
 
-        deployment_id = self.deploy_hello_world()
+        preupgrade_deployment_id = self.deploy_hello_world('pre-')
         upgrade_blueprint_path = self.get_upgrade_blueprint()
 
         self.upgrade_manager(upgrade_blueprint_path)
-        self.post_upgrade_checks(deployment_id)
 
-        self.uninstall_deployment(deployment_id)
+        postupgrade_deployment_id = self.deploy_hello_world('post-')
+        self.check_influx(postupgrade_deployment_id)
+        self.uninstall_deployment(postupgrade_deployment_id)
+
+        self.post_upgrade_checks(preupgrade_deployment_id)
+        self.check_influx(preupgrade_deployment_id)
+
         self.rollback_manager(upgrade_blueprint_path)
+        self.check_influx(preupgrade_deployment_id)
+        self.uninstall_deployment(preupgrade_deployment_id)
 
         self.post_rollback_checks()
 
@@ -197,9 +204,9 @@ class ManagerUpgradeTest(TestCase):
     def post_bootstrap_checks(self):
         self.rest_client.blueprints.list()
 
-    def deploy_hello_world(self):
-        blueprint_id = self.test_id
-        deployment_id = self.test_id
+    def deploy_hello_world(self, prefix=''):
+        blueprint_id = prefix + self.test_id
+        deployment_id = prefix + self.test_id
         hello_repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
         hello_repo_path = clone(
             'https://github.com/cloudify-cosmo/'
@@ -262,7 +269,6 @@ class ManagerUpgradeTest(TestCase):
 
     def post_upgrade_checks(self, deployment_id):
         self.rest_client.blueprints.list()
-        self.check_influx(deployment_id)
         try:
             response = urllib2.urlopen('http://{0}:{1}'.format(
                 self.upgrade_manager_ip, 9900))
