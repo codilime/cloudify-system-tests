@@ -19,6 +19,8 @@ import shutil
 import tempfile
 import urllib2
 
+from cloudify.workflows import local
+
 from cosmo_tester.framework.testenv import TestCase
 from cosmo_tester.framework.git_helper import clone
 from cosmo_tester.framework.cfy_helper import CfyHelper
@@ -52,7 +54,6 @@ class ManagerUpgradeTest(TestCase):
     # so that we can also have an aws-based test etc
 
     def test_manager_upgrade(self):
-        import pudb; pu.db  # NOQA
         self.prepare_manager()
 
         self.post_bootstrap_checks()
@@ -88,6 +89,8 @@ class ManagerUpgradeTest(TestCase):
                 self.env.handler_configuration['upgrade_manager_ip']
             self.manager_cfy = self.make_cfy()
             self.manager_cfy.use(self.upgrade_manager_ip)
+            self.manager_private_ip = self.env.handler_configuration.get(
+                'upgrade_manager_private_ip', '127.0.0.1')
 
     def prepare_manager(self):
         self.manager_inputs = self._get_bootstrap_inputs()
@@ -169,13 +172,24 @@ class ManagerUpgradeTest(TestCase):
                 patch.append_value(secgroup_cfg_path, secgroup_cfg)
         return yaml_path
 
+    def _load_private_ip_from_env(self, workdir):
+        storage = local.FileStorage(
+            os.path.join(
+                workdir, 'manager-blueprint', '.cloudify', 'bootstrap'))
+        env = local.load_env('manager', storage=storage)
+        return env.outputs()['private_ip']
+
     def bootstrap_manager(self, blueprint_path):
-        self.manager_cfy = self.make_cfy()
+        workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
+
+        self.manager_cfy = self.make_cfy(workdir)
         inputs_path = self.manager_cfy._get_inputs_in_temp_file(
             self.manager_inputs, self._testMethodName)
         self.manager_cfy.bootstrap(blueprint_path,
                                    inputs_file=inputs_path)
         self.upgrade_manager_ip = self.manager_cfy.get_management_ip()
+
+        self.manager_private_ip = self._load_private_ip_from_env(workdir)
 
         # TODO: why is this needed?
         self.manager_cfy.use(management_ip=self.upgrade_manager_ip)
@@ -184,8 +198,8 @@ class ManagerUpgradeTest(TestCase):
         self.rest_client.blueprints.list()
 
     def deploy_hello_world(self):
-        blueprint_name = self.test_id
-        deployment_name = self.test_id
+        blueprint_id = self.test_id
+        deployment_id = self.test_id
         hello_repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
         hello_repo_path = clone(
             'https://github.com/cloudify-cosmo/'
@@ -193,9 +207,9 @@ class ManagerUpgradeTest(TestCase):
             hello_repo_dir
         )
 
-        hello_blueprint_path = os.path.join(hello_repo_path, 'blueprint.yaml')
-        self.manager_cfy.upload_blueprint(blueprint_name, hello_blueprint_path)
-        self.addCleanup(self.manager_cfy.delete_blueprint, blueprint_name)
+        hello_blueprint_path = hello_repo_path / 'blueprint.yaml'
+        self.manager_cfy.upload_blueprint(blueprint_id, hello_blueprint_path)
+        self.addCleanup(self.manager_cfy.delete_blueprint, blueprint_id)
 
         # TODO if we separate base/openstack test case, this also needs to be
         # outside
@@ -204,12 +218,13 @@ class ManagerUpgradeTest(TestCase):
             'image': self.env.ubuntu_trusty_image_name,
             'flavor': self.env.flavor_name
         }
-        self.manager_cfy.create_deployment(blueprint_name, deployment_name,
+        self.manager_cfy.create_deployment(blueprint_id, deployment_id,
                                            inputs=inputs)
-        self.addCleanup(self.manager_cfy.delete_deployment, deployment_name)
+        self.addCleanup(self.manager_cfy.delete_deployment, deployment_id)
 
         # TODO uninstall in cleanup (separate method with check?)
-        self.manager_cfy.execute_install(deployment_id=deployment_name)
+        self.manager_cfy.execute_install(deployment_id=deployment_id)
+        return deployment_id
 
     def get_upgrade_blueprint(self):
         repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
@@ -246,6 +261,7 @@ class ManagerUpgradeTest(TestCase):
         self.manager_cfy.upgrade_manager(
             blueprint_path=upgrade_blueprint,
             inputs_file=upgrade_inputs_file)
+        self.manager_cfy.set_maintenance_mode(False)
 
     def post_upgrade_checks(self, deployment_id):
         self.rest_client.blueprints.list()
@@ -272,6 +288,9 @@ class ManagerUpgradeTest(TestCase):
 
         self.assertTrue(len(result) > 0)
 
+    def uninstall_deployment(self, deployment_id):
+        self.manager_cfy.execute_uninstall(deployment_id)
+
     def rollback_manager(self, rollback_blueprint):
         rollback_inputs = {
             'private_ip': '127.0.0.1',
@@ -287,11 +306,13 @@ class ManagerUpgradeTest(TestCase):
             inputs_file=rollback_inputs_file)
 
     def post_rollback_checks(self):
-        pass
-
-    def uninstall_deployment(self, deployment_id):
-        self.manager_cfy.executions.start(workflow='uninstall',
-                                          deployment_id=deployment_id).wait()
+        self.rest_client.blueprints.list()
+        try:
+            response = urllib2.urlopen('http://{0}:{1}'.format(
+                self.upgrade_manager_ip, 9200))
+            json.load(response)
+        except (ValueError, urllib2.URLError):
+            self.fail('elasticsearch isnt listening on the changed port')
 
     def teardown_manager(self):
         self.manager_cfy.teardown(ignore_deployments=True).wait()
