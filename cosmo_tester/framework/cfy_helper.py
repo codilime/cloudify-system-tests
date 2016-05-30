@@ -13,6 +13,7 @@
 #    * See the License for the specific language governing permissions and
 #    * limitations under the License.
 
+from contextlib import contextmanager
 import tempfile
 import shutil
 import json
@@ -408,3 +409,9 @@ class CfyHelper(object):
                 maintenance_handler.activate(wait=True).wait()
             else:
                 maintenance_handler.deactivate().wait()
+
+    @contextmanager
+    def maintenance_mode(self):
+        self.set_maintenance_mode(True)
+        yield
+        self.set_maintenance_mode(False)

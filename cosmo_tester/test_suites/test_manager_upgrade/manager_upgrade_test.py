@@ -257,11 +257,10 @@ class ManagerUpgradeTest(TestCase):
         upgrade_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
             upgrade_inputs, self._testMethodName)
 
-        self.manager_cfy.set_maintenance_mode(True)
-        self.manager_cfy.upgrade_manager(
-            blueprint_path=upgrade_blueprint,
-            inputs_file=upgrade_inputs_file)
-        self.manager_cfy.set_maintenance_mode(False)
+        with self.manager_cfy.maintenance_mode():
+            self.manager_cfy.upgrade_manager(
+                blueprint_path=upgrade_blueprint,
+                inputs_file=upgrade_inputs_file)
 
     def post_upgrade_checks(self, deployment_id):
         self.rest_client.blueprints.list()
@@ -300,10 +299,11 @@ class ManagerUpgradeTest(TestCase):
         }
         rollback_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
             rollback_inputs, self._testMethodName)
-        self.manager_cfy.set_maintenance_mode(True)
-        self.manager_cfy.rollback_manager(
-            blueprint_path=rollback_blueprint,
-            inputs_file=rollback_inputs_file)
+
+        with self.manager_cfy.maintenance_mode():
+            self.manager_cfy.rollback_manager(
+                blueprint_path=rollback_blueprint,
+                inputs_file=rollback_inputs_file)
 
     def post_rollback_checks(self):
         self.rest_client.blueprints.list()
@@ -315,4 +315,4 @@ class ManagerUpgradeTest(TestCase):
             self.fail('elasticsearch isnt listening on the changed port')
 
     def teardown_manager(self):
-        self.manager_cfy.teardown(ignore_deployments=True).wait()
+        self.manager_cfy.teardown(ignore_deployments=True)
