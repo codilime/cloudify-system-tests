@@ -56,22 +56,12 @@ class ManagerUpgradeTest(TestCase):
     def test_manager_upgrade(self):
         self.prepare_manager()
 
-        preupgrade_deployment_id = self.deploy_hello_world('pre-')
-        upgrade_blueprint_path = self.get_upgrade_blueprint()
+        self.preupgrade_deployment_id = self.deploy_hello_world('pre-')
 
-        self.upgrade_manager(upgrade_blueprint_path)
+        self.upgrade_manager()
+        self.post_upgrade_checks()
 
-        postupgrade_deployment_id = self.deploy_hello_world('post-')
-        self.check_influx(postupgrade_deployment_id)
-        self.uninstall_deployment(postupgrade_deployment_id)
-
-        self.post_upgrade_checks(preupgrade_deployment_id)
-        self.check_influx(preupgrade_deployment_id)
-
-        self.rollback_manager(upgrade_blueprint_path)
-        self.check_influx(preupgrade_deployment_id)
-        self.uninstall_deployment(preupgrade_deployment_id)
-
+        self.rollback_manager()
         self.post_rollback_checks()
 
         self.teardown_manager()
@@ -257,9 +247,14 @@ class ManagerUpgradeTest(TestCase):
                 blueprint_path=blueprint_path,
                 inputs_file=upgrade_inputs_file)
 
-    def post_upgrade_checks(self, deployment_id):
+    def post_upgrade_checks(self):
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9900)
+        self.check_influx(self.preupgrade_deployment_id)
+
+        postupgrade_deployment_id = self.deploy_hello_world('post-')
+        self.check_influx(postupgrade_deployment_id)
+        self.uninstall_deployment(postupgrade_deployment_id)
 
     def check_influx(self, deployment_id):
         # TODO influx config should be pulled from props?
@@ -309,6 +304,7 @@ class ManagerUpgradeTest(TestCase):
     def post_rollback_checks(self):
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9200)
+        self.check_influx(self.preupgrade_deployment_id)
 
     def teardown_manager(self):
         self.manager_cfy.teardown(ignore_deployments=True)
