@@ -231,15 +231,15 @@ class ManagerUpgradeTest(TestCase):
                                        repo_dir,
                                        branch=UPGRADE_BRANCH)
 
-        yaml_path = upgrade_blueprint_path / 'simple-manager-blueprint.yaml'
-        with YamlPatcher(yaml_path) as patch:
+        return upgrade_blueprint_path / 'simple-manager-blueprint.yaml'
+
+    def upgrade_manager(self):
+        blueprint_path = self.get_upgrade_blueprint()
+        with YamlPatcher(blueprint_path) as patch:
             patch.set_value(
                 ('node_templates.elasticsearch.properties'
                  '.use_existing_on_upgrade'),
                 False)
-        return yaml_path
-
-    def upgrade_manager(self, upgrade_blueprint):
 
         upgrade_inputs = {
             'private_ip': self.manager_private_ip,
@@ -254,7 +254,7 @@ class ManagerUpgradeTest(TestCase):
 
         with self.manager_cfy.maintenance_mode():
             self.manager_cfy.upgrade_manager(
-                blueprint_path=upgrade_blueprint,
+                blueprint_path=blueprint_path,
                 inputs_file=upgrade_inputs_file)
 
     def post_upgrade_checks(self, deployment_id):
@@ -290,7 +290,8 @@ class ManagerUpgradeTest(TestCase):
     def uninstall_deployment(self, deployment_id):
         self.manager_cfy.execute_uninstall(deployment_id)
 
-    def rollback_manager(self, rollback_blueprint):
+    def rollback_manager(self):
+        blueprint_path = self.get_upgrade_blueprint()
         rollback_inputs = {
             'private_ip': self.manager_private_ip,
             'public_ip': self.upgrade_manager_ip,
@@ -302,7 +303,7 @@ class ManagerUpgradeTest(TestCase):
 
         with self.manager_cfy.maintenance_mode():
             self.manager_cfy.rollback_manager(
-                blueprint_path=rollback_blueprint,
+                blueprint_path=blueprint_path,
                 inputs_file=rollback_inputs_file)
 
     def post_rollback_checks(self):
