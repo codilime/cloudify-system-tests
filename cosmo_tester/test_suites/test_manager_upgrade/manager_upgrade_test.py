@@ -56,8 +56,6 @@ class ManagerUpgradeTest(TestCase):
     def test_manager_upgrade(self):
         self.prepare_manager()
 
-        self.post_bootstrap_checks()
-
         preupgrade_deployment_id = self.deploy_hello_world('pre-')
         upgrade_blueprint_path = self.get_upgrade_blueprint()
 
@@ -83,9 +81,6 @@ class ManagerUpgradeTest(TestCase):
         return 'upgrade_manager_ip' in self.env.handler_configuration
 
     def make_cfy(self, workdir=None):
-        # TODO: perhaps need to use a separate cfy checkout? so cli version
-        # is the same as the manager version (pre/post-ugprade)
-        # TODO: or maybe need a --skip-version-check
         if workdir is None:
             workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
             self.addCleanup(shutil.rmtree, workdir)
@@ -181,8 +176,7 @@ class ManagerUpgradeTest(TestCase):
 
     def _load_private_ip_from_env(self, workdir):
         storage = local.FileStorage(
-            os.path.join(
-                workdir, 'manager-blueprint', '.cloudify', 'bootstrap'))
+            os.path.join(workdir, '.cloudify', 'bootstrap'))
         env = local.load_env('manager', storage=storage)
         return env.outputs()['private_ip']
 
@@ -200,9 +194,6 @@ class ManagerUpgradeTest(TestCase):
 
         # TODO: why is this needed?
         self.manager_cfy.use(management_ip=self.upgrade_manager_ip)
-
-    def post_bootstrap_checks(self):
-        self.rest_client.blueprints.list()
 
     def deploy_hello_world(self, prefix=''):
         blueprint_id = prefix + self.test_id
@@ -240,7 +231,6 @@ class ManagerUpgradeTest(TestCase):
                                        repo_dir,
                                        branch=UPGRADE_BRANCH)
 
-        # TODO: this uses a simple blueprint, is that right?
         yaml_path = upgrade_blueprint_path / 'simple-manager-blueprint.yaml'
         with YamlPatcher(yaml_path) as patch:
             patch.set_value(
