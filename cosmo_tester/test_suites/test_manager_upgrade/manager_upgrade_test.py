@@ -43,9 +43,9 @@ BOOTSTRAP_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                      'cloudify-manager-blueprints.git'
 BOOTSTRAP_BRANCH = '3.4m5'
 
-UPGRADE_REPO_URL = 'https://github.com/codilime/' \
+UPGRADE_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                    'cloudify-manager-blueprints.git'
-UPGRADE_BRANCH = 'fixup-upgrade'
+UPGRADE_BRANCH = 'master'
 
 
 class ManagerUpgradeTest(TestCase):
