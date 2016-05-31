@@ -13,12 +13,18 @@
 #    * See the License for the specific language governing permissions and
 #    * limitations under the License.
 
+from contextlib import contextmanager
+from functools import total_ordering
 import json
 import os
 import shutil
+import re
 import tempfile
 import time
 import urllib2
+
+import fabric
+from influxdb import InfluxDBClient
 
 from cloudify.workflows import local
 
@@ -28,8 +34,6 @@ from cosmo_tester.framework.cfy_helper import CfyHelper
 
 from cosmo_tester.framework.util import create_rest_client, YamlPatcher
 
-from influxdb import InfluxDBClient
-
 
 BOOTSTRAP_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                      'cloudify-manager-blueprints.git'
@@ -38,6 +42,63 @@ BOOTSTRAP_BRANCH = 'master'
 UPGRADE_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                    'cloudify-manager-blueprints.git'
 UPGRADE_BRANCH = 'master'
+
+
+# TODO maybe use setuptools instead?
+@total_ordering
+class VersionNumber(object):
+    def __init__(self, version, **kwargs):
+        self._version = version
+        self._parts = [self._parse_part(part)
+                       for part in self._split_version(version)]
+
+    def _split_version(self, version):
+        return re.split(r'[.-]', version)
+
+    def _parse_part(self, part):
+        try:
+            return int(part)
+        except ValueError:
+            return part
+
+    def __repr__(self):
+        return '<{0} {1}>'.format(self.__class__.__name__,
+                                  self._version)
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self._parts == other._parts
+        else:
+            return self._parts == other
+
+    def __lt__(self, other):
+        if isinstance(other, self.__class__):
+            return self._parts < other._parts
+        else:
+            return self._parts < other
+
+KNOWN_RPM_PACKAGES = {
+    'cloudify-amqp-influx-',
+    'cloudify-rest-service-',
+    'cloudify-management-worker-'
+}
+
+
+def _get_rpm_versions(output):
+    """Parse out version numbers from a `rpm -qa` call.
+
+    Only look at packages in KNOWN_RPM_PACKAGES.
+    """
+    versions = {}
+    for line in output.split('\n'):
+        line = line.strip()
+        for package in KNOWN_RPM_PACKAGES:
+            if line.startswith(package):
+                line = line.replace(package, '')
+                version, sep, arch = line.split('_')
+                versions[package] = VersionNumber(version)
+                break
+    return versions
 
 
 class ManagerUpgradeTest(TestCase):
@@ -70,6 +131,20 @@ class ManagerUpgradeTest(TestCase):
 
         self.teardown_manager()
 
+    @contextmanager
+    def _manager_fabric_env(self):
+        inputs = self.manager_inputs
+        with fabric.context_managers.settings(
+                host_string=self.upgrade_manager_ip,
+                user=inputs['ssh_user'],
+                key_filename=inputs['ssh_key_filename']):
+            yield fabric.api
+
+    def _cloudify_rpm_versions(self):
+        with self._manager_fabric_env() as fabric:
+            rpms = fabric.sudo('rpm -qa | grep cloudify')
+        return _get_rpm_versions(rpms)
+
     def prepare_manager(self):
         # note that we're using a separate manager checkout, so we need to
         # create our own utils like cfy and the rest client, rather than use
@@ -84,7 +159,10 @@ class ManagerUpgradeTest(TestCase):
         self.bootstrap_manager(blueprint_path)
 
         self.rest_client = create_rest_client(self.upgrade_manager_ip)
-        self.bootstrap_manager_version = self.rest_client.manager.get_version()
+
+        self.bootstrap_rpm_versions = self._cloudify_rpm_versions()
+        self.bootstrap_manager_version = VersionNumber(
+            **self.rest_client.manager.get_version())
 
     def _get_bootstrap_inputs(self):
         prefix = self.test_id
@@ -245,10 +323,14 @@ class ManagerUpgradeTest(TestCase):
               and uninstall it: to check that the manager still allows
               creating, installing and uninstalling deployments correctly
         """
-        upgrade_manager_version = self.rest_client.manager.get_version()
-
+        upgrade_manager_version = VersionNumber(
+            **self.rest_client.manager.get_version())
+        upgrade_rpm_versions = self._cloudify_rpm_versions()
         self.assertGreaterEqual(upgrade_manager_version,
                                 self.bootstrap_manager_version)
+        for package, original_version in self.bootstrap_rpm_versions.items():
+            upgraded_version = upgrade_rpm_versions[package]
+            self.assertGreaterEqual(upgraded_version, original_version)
 
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9900)
@@ -301,7 +383,13 @@ class ManagerUpgradeTest(TestCase):
         self.manager_cfy.execute_uninstall(deployment_id)
 
     def rollback_manager(self):
-        rollback_manager_version = self.rest_client.manager.get_version()
+        rollback_manager_version = VersionNumber(
+            **self.rest_client.manager.get_version())
+        rollback_rpm_versions = self._cloudify_rpm_versions()
+
+        for package, original_version in self.bootstrap_rpm_versions.items():
+            upgraded_version = rollback_rpm_versions[package]
+            self.assertEqual(upgraded_version, original_version)
 
         self.assertEqual(rollback_manager_version,
                          self.bootstrap_manager_version)
