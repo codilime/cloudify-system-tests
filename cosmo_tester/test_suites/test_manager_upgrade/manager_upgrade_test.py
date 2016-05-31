@@ -25,24 +25,15 @@ from cloudify.workflows import local
 from cosmo_tester.framework.testenv import TestCase
 from cosmo_tester.framework.git_helper import clone
 from cosmo_tester.framework.cfy_helper import CfyHelper
-from cosmo_tester.framework.testenv import (initialize_without_bootstrap,
-                                            clear_environment)
+
 from cosmo_tester.framework.util import create_rest_client, YamlPatcher
 
 from influxdb import InfluxDBClient
 
 
-def setUp():
-    initialize_without_bootstrap()
-
-
-def tearDown():
-    clear_environment()
-
-
 BOOTSTRAP_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                      'cloudify-manager-blueprints.git'
-BOOTSTRAP_BRANCH = '3.4m5'
+BOOTSTRAP_BRANCH = 'master'
 
 UPGRADE_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                    'cloudify-manager-blueprints.git'
@@ -93,6 +84,7 @@ class ManagerUpgradeTest(TestCase):
         self.bootstrap_manager(blueprint_path)
 
         self.rest_client = create_rest_client(self.upgrade_manager_ip)
+        self.bootstrap_manager_version = self.rest_client.manager.get_version()
 
     def _get_bootstrap_inputs(self):
         prefix = self.test_id
@@ -253,6 +245,11 @@ class ManagerUpgradeTest(TestCase):
               and uninstall it: to check that the manager still allows
               creating, installing and uninstalling deployments correctly
         """
+        upgrade_manager_version = self.rest_client.manager.get_version()
+
+        self.assertGreaterEqual(upgrade_manager_version,
+                                self.bootstrap_manager_version)
+
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9900)
         self.check_influx(self.preupgrade_deployment_id)
@@ -304,6 +301,11 @@ class ManagerUpgradeTest(TestCase):
         self.manager_cfy.execute_uninstall(deployment_id)
 
     def rollback_manager(self):
+        rollback_manager_version = self.rest_client.manager.get_version()
+
+        self.assertEqual(rollback_manager_version,
+                         self.bootstrap_manager_version)
+
         blueprint_path = self.get_upgrade_blueprint()
         rollback_inputs = {
             'private_ip': self.manager_private_ip,
