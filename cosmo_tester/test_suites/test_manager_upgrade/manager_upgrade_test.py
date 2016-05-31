@@ -113,7 +113,8 @@ class ManagerUpgradeTest(TestCase):
         blueprint_rpms = self._blueprint_rpm_versions(self.cfy_workdir)
         installed_rpms = self._cloudify_rpm_versions()
         for service_name, rpm_filename in blueprint_rpms.items():
-            for line in installed_rpms:
+            for line in installed_rpms.split('\n'):
+                line = line.strip()
                 if line.startswith(service_name):
                     self.assertIn(rpm_filename, line)
 
