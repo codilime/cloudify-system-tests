@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import urllib2
 
 from cloudify.workflows import local
@@ -198,7 +199,7 @@ class ManagerUpgradeTest(TestCase):
         self.manager_cfy.upload_blueprint(blueprint_id, hello_blueprint_path)
 
         inputs = {
-            'agent_user': self.env.cloudify_agent_user,
+            'agent_user': self.env.ubuntu_image_user,
             'image': self.env.ubuntu_trusty_image_name,
             'flavor': self.env.flavor_name
         }
@@ -263,9 +264,13 @@ class ManagerUpgradeTest(TestCase):
     def check_influx(self, deployment_id):
         """Check that the deployment_id continues to report metrics.
 
-        Look at the last 5 seconds worth of metrics
+        Look at the last 5 seconds worth of metrics. To avoid race conditions
+        (running this check before the deployment even had a chance to report
+        any metrics), first wait 5 seconds to allow some metrics to be
+        gathered.
         """
         # TODO influx config should be pulled from props?
+        time.sleep(5)
         influx_client = InfluxDBClient(self.upgrade_manager_ip, 8086,
                                        'root', 'root', 'cloudify')
         try:
