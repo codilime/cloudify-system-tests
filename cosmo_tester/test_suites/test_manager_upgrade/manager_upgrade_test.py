@@ -50,10 +50,23 @@ UPGRADE_BRANCH = 'master'
 
 class ManagerUpgradeTest(TestCase):
 
-    # TODO check if we want to separate openstack and base testcases
-    # so that we can also have an aws-based test etc
-
     def test_manager_upgrade(self):
+        """Bootstrap a manager, upgrade it, rollback it, examine the results.
+
+        To test the manager in-place upgrade procedure:
+            - bootstrap a manager (this is part of the system under test,
+              does destructive changes to the manager, and need a known manager
+              version: so, can't use the testenv manager)
+            - deploy the hello world app
+            - upgrade the manager, changing some inputs (eg. the port that
+              Elasticsearch uses)
+            - check that everything still works (the previous deployment still
+              reports metrics; we can install another deployment)
+            - rollback the manager
+            - post-rollback checks: the changed inputs are now the original
+              values again, the installed app still reports metrics
+        """
+        import pudb; pu.db  # NOQA
         self.prepare_manager()
 
         self.preupgrade_deployment_id = self.deploy_hello_world('pre-')
@@ -66,45 +79,28 @@ class ManagerUpgradeTest(TestCase):
 
         self.teardown_manager()
 
-    @property
-    def _use_existing(self):
-        return 'upgrade_manager_ip' in self.env.handler_configuration
-
-    def make_cfy(self, workdir=None):
-        if workdir is None:
-            workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
-            self.addCleanup(shutil.rmtree, workdir)
-        return CfyHelper(cfy_workdir=workdir)
-
-    def load_existing_manager(self):
-            self.upgrade_manager_ip = \
-                self.env.handler_configuration['upgrade_manager_ip']
-            self.manager_cfy = self.make_cfy()
-            self.manager_cfy.use(self.upgrade_manager_ip)
-            self.manager_private_ip = self.env.handler_configuration.get(
-                'upgrade_manager_private_ip', '127.0.0.1')
-
     def prepare_manager(self):
+        # note that we're using a separate manager checkout, so we need to
+        # create our own utils like cfy and the rest client, rather than use
+        # the testenv ones
+        self.cfy_workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
+        self.addCleanup(shutil.rmtree, self.cfy_workdir)
+        self.manager_cfy = CfyHelper(cfy_workdir=self.cfy_workdir)
+
         self.manager_inputs = self._get_bootstrap_inputs()
-        if self._use_existing:
-            self.load_existing_manager()
-        else:
-            blueprint_path = self.get_bootstrap_blueprint()
-            self.bootstrap_manager(blueprint_path)
+
+        blueprint_path = self.get_bootstrap_blueprint()
+        self.bootstrap_manager(blueprint_path)
 
         self.rest_client = create_rest_client(self.upgrade_manager_ip)
 
     def _get_bootstrap_inputs(self):
         prefix = self.test_id
 
-        if self._use_existing:
-            ssh_key_filename = self.env.handler_configuration[
-                'upgrade_manager_key']
-        else:
-            ssh_key_filename = os.path.join(self.workdir, 'manager.key')
-            self.addCleanup(os.unlink, ssh_key_filename)
-            self.addCleanup(self.env.handler.remove_keypair,
-                            prefix + '-manager-key')
+        ssh_key_filename = os.path.join(self.workdir, 'manager.key')
+        self.addCleanup(os.unlink, ssh_key_filename)
+        self.addCleanup(self.env.handler.remove_keypair,
+                        prefix + '-manager-key')
 
         agent_key_path = os.path.join(self.workdir, 'agents.key')
         self.addCleanup(os.unlink, agent_key_path)
@@ -152,6 +148,9 @@ class ManagerUpgradeTest(TestCase):
                              manager_repo_dir,
                              branch=BOOTSTRAP_BRANCH)
         yaml_path = manager_repo / 'openstack-manager-blueprint.yaml'
+
+        # allow the ports that we're going to connect to from the tests,
+        # when doing checks
         for port in [8086, 9200, 9900]:
             secgroup_cfg = [{
                 'port_range_min': port,
@@ -162,6 +161,7 @@ class ManagerUpgradeTest(TestCase):
                 '.properties.rules'
             with YamlPatcher(yaml_path) as patch:
                 patch.append_value(secgroup_cfg_path, secgroup_cfg)
+
         return yaml_path
 
     def _load_private_ip_from_env(self, workdir):
@@ -171,21 +171,21 @@ class ManagerUpgradeTest(TestCase):
         return env.outputs()['private_ip']
 
     def bootstrap_manager(self, blueprint_path):
-        workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
-
-        self.manager_cfy = self.make_cfy(workdir)
         inputs_path = self.manager_cfy._get_inputs_in_temp_file(
             self.manager_inputs, self._testMethodName)
+
         self.manager_cfy.bootstrap(blueprint_path,
                                    inputs_file=inputs_path)
-        self.upgrade_manager_ip = self.manager_cfy.get_management_ip()
 
-        self.manager_private_ip = self._load_private_ip_from_env(workdir)
+        self.upgrade_manager_ip = self.manager_cfy.get_management_ip()
+        self.manager_private_ip = self._load_private_ip_from_env(
+            self.cfy_workdir)
 
         # TODO: why is this needed?
         self.manager_cfy.use(management_ip=self.upgrade_manager_ip)
 
     def deploy_hello_world(self, prefix=''):
+        """Install the hello world app."""
         blueprint_id = prefix + self.test_id
         deployment_id = prefix + self.test_id
         hello_repo_dir = tempfile.mkdtemp(prefix='manager-upgrade-')
@@ -194,13 +194,10 @@ class ManagerUpgradeTest(TestCase):
             'cloudify-hello-world-example.git',
             hello_repo_dir
         )
-
+        self.addCleanup(shutil.rmtree, hello_repo_dir)
         hello_blueprint_path = hello_repo_path / 'blueprint.yaml'
         self.manager_cfy.upload_blueprint(blueprint_id, hello_blueprint_path)
-        self.addCleanup(self.manager_cfy.delete_blueprint, blueprint_id)
 
-        # TODO if we separate base/openstack test case, this also needs to be
-        # outside
         inputs = {
             'agent_user': self.env.cloudify_agent_user,
             'image': self.env.ubuntu_trusty_image_name,
@@ -208,9 +205,7 @@ class ManagerUpgradeTest(TestCase):
         }
         self.manager_cfy.create_deployment(blueprint_id, deployment_id,
                                            inputs=inputs)
-        self.addCleanup(self.manager_cfy.delete_deployment, deployment_id)
 
-        # TODO uninstall in cleanup (separate method with check?)
         self.manager_cfy.execute_install(deployment_id=deployment_id)
         return deployment_id
 
@@ -225,6 +220,8 @@ class ManagerUpgradeTest(TestCase):
 
     def upgrade_manager(self):
         blueprint_path = self.get_upgrade_blueprint()
+
+        # we're changing one of the ES inputs - make sure we also re-install ES
         with YamlPatcher(blueprint_path) as patch:
             patch.set_value(
                 ('node_templates.elasticsearch.properties'
@@ -265,6 +262,10 @@ class ManagerUpgradeTest(TestCase):
         self.uninstall_deployment(postupgrade_deployment_id)
 
     def check_influx(self, deployment_id):
+        """Check that the deployment_id continues to report metrics.
+
+        Look at the last 5 seconds worth of metrics
+        """
         # TODO influx config should be pulled from props?
         influx_client = InfluxDBClient(self.upgrade_manager_ip, 8086,
                                        'root', 'root', 'cloudify')
@@ -280,9 +281,14 @@ class ManagerUpgradeTest(TestCase):
         self.assertTrue(len(result) > 0)
 
     def check_elasticsearch(self, host, port):
+        """Check that elasticsearch is listening on the given host:port.
+
+        This is used for checking if the ES port changed correctly during
+        the upgrade.
+        """
         try:
             response = urllib2.urlopen('http://{0}:{1}'.format(
-                self.upgrade_manager_ip, 9200))
+                self.upgrade_manager_ip, port))
             response = json.load(response)
             if response['status'] != 200:
                 raise ValueError('Incorrect status {0}'.format(
