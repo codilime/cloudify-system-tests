@@ -61,6 +61,7 @@ class ManagerUpgradeTest(TestCase):
             - post-rollback checks: the changed inputs are now the original
               values again, the installed app still reports metrics
         """
+        import pudb; pu.db  # NOQA
         self.prepare_manager()
 
         self.preupgrade_deployment_id = self.deploy_hello_world('pre-')
@@ -87,10 +88,10 @@ class ManagerUpgradeTest(TestCase):
             os.path.join(workdir, '.cloudify', 'bootstrap'))
         return local.load_env('manager', storage=storage)
 
-    def _blueprint_rpm_versions(self, workdir):
+    def _blueprint_rpm_versions(self):
         """RPM filenames that should be installed on the manager.
         """
-        env = self._bootstrap_local_env(workdir)
+        env = self._bootstrap_local_env(self.cfy_workdir)
         storage = env.storage
 
         amqp_influx_rpm = storage.get_node('amqp_influx')['properties'][
@@ -110,7 +111,7 @@ class ManagerUpgradeTest(TestCase):
             return fabric.sudo('rpm -qa | grep cloudify')
 
     def check_rpm_versions(self):
-        blueprint_rpms = self._blueprint_rpm_versions(self.cfy_workdir)
+        blueprint_rpms = self._blueprint_rpm_versions()
         installed_rpms = self._cloudify_rpm_versions()
         for service_name, rpm_filename in blueprint_rpms.items():
             for line in installed_rpms.split('\n'):
