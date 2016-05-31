@@ -25,7 +25,9 @@ from distutils.version import LooseVersion
 import fabric
 from influxdb import InfluxDBClient
 
+from cloudify_cli import constants as cli_constants
 from cloudify.workflows import local
+from dsl_parser.parser import parse_from_path
 
 from cosmo_tester.framework.testenv import TestCase
 from cosmo_tester.framework.git_helper import clone
@@ -61,6 +63,7 @@ class ManagerUpgradeTest(TestCase):
             - post-rollback checks: the changed inputs are now the original
               values again, the installed app still reports metrics
         """
+        import pudb; pu.db # NOQA
         self.prepare_manager()
 
         self.preupgrade_deployment_id = self.deploy_hello_world('pre-')
@@ -87,10 +90,14 @@ class ManagerUpgradeTest(TestCase):
             os.path.join(workdir, '.cloudify', 'bootstrap'))
         return local.load_env('manager', storage=storage)
 
-    def _blueprint_rpm_versions(self):
+    def _blueprint_rpm_versions(self, blueprint_path, inputs):
         """RPM filenames that should be installed on the manager.
         """
-        env = self._bootstrap_local_env(self.cfy_workdir)
+        env = local.init_env(
+            blueprint_path,
+            inputs=inputs,
+            ignored_modules=cli_constants.IGNORED_LOCAL_WORKFLOW_MODULES)
+
         storage = env.storage
 
         amqp_influx_rpm = storage.get_node('amqp_influx')['properties'][
@@ -109,8 +116,8 @@ class ManagerUpgradeTest(TestCase):
         with self._manager_fabric_env() as fabric:
             return fabric.sudo('rpm -qa | grep cloudify')
 
-    def check_rpm_versions(self):
-        blueprint_rpms = self._blueprint_rpm_versions()
+    def check_rpm_versions(self, blueprint_path):
+        blueprint_rpms = self._blueprint_rpm_versions(blueprint_path)
         installed_rpms = self._cloudify_rpm_versions()
         for service_name, rpm_filename in blueprint_rpms.items():
             for line in installed_rpms.split('\n'):
@@ -128,8 +135,7 @@ class ManagerUpgradeTest(TestCase):
 
         self.manager_inputs = self._get_bootstrap_inputs()
 
-        blueprint_path = self.get_bootstrap_blueprint()
-        self.bootstrap_manager(blueprint_path)
+        self.bootstrap_manager()
 
         self.rest_client = create_rest_client(self.upgrade_manager_ip)
 
@@ -208,11 +214,12 @@ class ManagerUpgradeTest(TestCase):
         env = self._bootstrap_local_env(workdir)
         return env.outputs()['private_ip']
 
-    def bootstrap_manager(self, blueprint_path):
+    def bootstrap_manager(self):
+        self.bootstrap_blueprint = self.get_bootstrap_blueprint()
         inputs_path = self.manager_cfy._get_inputs_in_temp_file(
             self.manager_inputs, self._testMethodName)
 
-        self.manager_cfy.bootstrap(blueprint_path,
+        self.manager_cfy.bootstrap(self.bootstrap_blueprint,
                                    inputs_file=inputs_path)
 
         self.upgrade_manager_ip = self.manager_cfy.get_management_ip()
@@ -257,10 +264,10 @@ class ManagerUpgradeTest(TestCase):
         return upgrade_blueprint_path / 'simple-manager-blueprint.yaml'
 
     def upgrade_manager(self):
-        blueprint_path = self.get_upgrade_blueprint()
+        self.upgrade_blueprint = self.get_upgrade_blueprint()
 
         # we're changing one of the ES inputs - make sure we also re-install ES
-        with YamlPatcher(blueprint_path) as patch:
+        with YamlPatcher(self.upgrade_blueprint) as patch:
             patch.set_value(
                 ('node_templates.elasticsearch.properties'
                  '.use_existing_on_upgrade'),
@@ -279,7 +286,7 @@ class ManagerUpgradeTest(TestCase):
 
         with self.manager_cfy.maintenance_mode():
             self.manager_cfy.upgrade_manager(
-                blueprint_path=blueprint_path,
+                blueprint_path=self.upgrade_blueprint,
                 inputs_file=upgrade_inputs_file)
 
     def post_upgrade_checks(self):
@@ -295,7 +302,7 @@ class ManagerUpgradeTest(TestCase):
             self.rest_client.manager.get_version()['version'])
         self.assertGreaterEqual(upgrade_manager_version,
                                 self.bootstrap_manager_version)
-        self.check_rpm_versions()
+        self.check_rpm_versions(self.upgrade_blueprint)
 
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9900)
@@ -348,8 +355,6 @@ class ManagerUpgradeTest(TestCase):
         self.manager_cfy.execute_uninstall(deployment_id)
 
     def rollback_manager(self):
-
-        blueprint_path = self.get_upgrade_blueprint()
         rollback_inputs = {
             'private_ip': self.manager_private_ip,
             'public_ip': self.upgrade_manager_ip,
@@ -361,7 +366,7 @@ class ManagerUpgradeTest(TestCase):
 
         with self.manager_cfy.maintenance_mode():
             self.manager_cfy.rollback_manager(
-                blueprint_path=blueprint_path,
+                blueprint_path=self.upgrade_blueprint,
                 inputs_file=rollback_inputs_file)
 
     def post_rollback_checks(self):
@@ -369,7 +374,7 @@ class ManagerUpgradeTest(TestCase):
             self.rest_client.manager.get_version()['version'])
         self.assertEqual(rollback_manager_version,
                          self.bootstrap_manager_version)
-        self.check_rpm_versions()
+        self.check_rpm_versions(self.bootstrap_blueprint)
 
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9200)
