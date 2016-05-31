@@ -135,7 +135,7 @@ class ManagerUpgradeTest(TestCase):
         self.rest_client = create_rest_client(self.upgrade_manager_ip)
 
         self.bootstrap_manager_version = LooseVersion(
-            **self.rest_client.manager.get_version())
+            self.rest_client.manager.get_version()['version'])
 
     def _get_bootstrap_inputs(self):
         prefix = self.test_id
@@ -293,7 +293,7 @@ class ManagerUpgradeTest(TestCase):
               creating, installing and uninstalling deployments correctly
         """
         upgrade_manager_version = LooseVersion(
-            **self.rest_client.manager.get_version())
+            self.rest_client.manager.get_version()['version'])
         self.assertGreaterEqual(upgrade_manager_version,
                                 self.bootstrap_manager_version)
         self.check_rpm_versions()
@@ -367,7 +367,7 @@ class ManagerUpgradeTest(TestCase):
 
     def post_rollback_checks(self):
         rollback_manager_version = LooseVersion(
-            **self.rest_client.manager.get_version())
+            self.rest_client.manager.get_version()['version'])
         self.assertEqual(rollback_manager_version,
                          self.bootstrap_manager_version)
         self.check_rpm_versions()
