@@ -37,7 +37,7 @@ from cosmo_tester.framework.util import create_rest_client, YamlPatcher
 
 BOOTSTRAP_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                      'cloudify-manager-blueprints.git'
-BOOTSTRAP_BRANCH = 'master'
+BOOTSTRAP_BRANCH = '3.4m5'
 
 UPGRADE_REPO_URL = 'https://github.com/cloudify-cosmo/'\
                    'cloudify-manager-blueprints.git'
