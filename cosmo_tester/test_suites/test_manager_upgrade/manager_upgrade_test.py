@@ -383,16 +383,6 @@ class ManagerUpgradeTest(TestCase):
         self.manager_cfy.execute_uninstall(deployment_id)
 
     def rollback_manager(self):
-        rollback_manager_version = VersionNumber(
-            **self.rest_client.manager.get_version())
-        rollback_rpm_versions = self._cloudify_rpm_versions()
-
-        for package, original_version in self.bootstrap_rpm_versions.items():
-            upgraded_version = rollback_rpm_versions[package]
-            self.assertEqual(upgraded_version, original_version)
-
-        self.assertEqual(rollback_manager_version,
-                         self.bootstrap_manager_version)
 
         blueprint_path = self.get_upgrade_blueprint()
         rollback_inputs = {
@@ -410,6 +400,16 @@ class ManagerUpgradeTest(TestCase):
                 inputs_file=rollback_inputs_file)
 
     def post_rollback_checks(self):
+        rollback_manager_version = VersionNumber(
+            **self.rest_client.manager.get_version())
+        rollback_rpm_versions = self._cloudify_rpm_versions()
+
+        for package, original_version in self.bootstrap_rpm_versions.items():
+            upgraded_version = rollback_rpm_versions[package]
+            self.assertEqual(upgraded_version, original_version)
+        self.assertEqual(rollback_manager_version,
+                         self.bootstrap_manager_version)
+
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9200)
         self.check_influx(self.preupgrade_deployment_id)
