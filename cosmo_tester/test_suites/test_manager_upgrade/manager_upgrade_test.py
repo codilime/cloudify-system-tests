@@ -116,8 +116,8 @@ class ManagerUpgradeTest(TestCase):
         with self._manager_fabric_env() as fabric:
             return fabric.sudo('rpm -qa | grep cloudify')
 
-    def check_rpm_versions(self, blueprint_path):
-        blueprint_rpms = self._blueprint_rpm_versions(blueprint_path)
+    def check_rpm_versions(self, blueprint_path, inputs):
+        blueprint_rpms = self._blueprint_rpm_versions(blueprint_path, inputs)
         installed_rpms = self._cloudify_rpm_versions()
         for service_name, rpm_filename in blueprint_rpms.items():
             for line in installed_rpms.split('\n'):
@@ -273,7 +273,7 @@ class ManagerUpgradeTest(TestCase):
                  '.use_existing_on_upgrade'),
                 False)
 
-        upgrade_inputs = {
+        self.upgrade_inputs = {
             'private_ip': self.manager_private_ip,
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
@@ -282,7 +282,7 @@ class ManagerUpgradeTest(TestCase):
 
         }
         upgrade_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
-            upgrade_inputs, self._testMethodName)
+            self.upgrade_inputs, self._testMethodName)
 
         with self.manager_cfy.maintenance_mode():
             self.manager_cfy.upgrade_manager(
@@ -302,7 +302,7 @@ class ManagerUpgradeTest(TestCase):
             self.rest_client.manager.get_version()['version'])
         self.assertGreaterEqual(upgrade_manager_version,
                                 self.bootstrap_manager_version)
-        self.check_rpm_versions(self.upgrade_blueprint)
+        self.check_rpm_versions(self.upgrade_blueprint, self.upgrade_inputs)
 
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9900)
@@ -374,7 +374,7 @@ class ManagerUpgradeTest(TestCase):
             self.rest_client.manager.get_version()['version'])
         self.assertEqual(rollback_manager_version,
                          self.bootstrap_manager_version)
-        self.check_rpm_versions(self.bootstrap_blueprint)
+        self.check_rpm_versions(self.bootstrap_blueprint, self.manager_inputs)
 
         self.rest_client.blueprints.list()
         self.check_elasticsearch(self.upgrade_manager_ip, 9200)
