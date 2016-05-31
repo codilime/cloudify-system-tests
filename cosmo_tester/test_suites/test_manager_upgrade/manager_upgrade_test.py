@@ -63,7 +63,6 @@ class ManagerUpgradeTest(TestCase):
             - post-rollback checks: the changed inputs are now the original
               values again, the installed app still reports metrics
         """
-        import pudb; pu.db # NOQA
         self.prepare_manager()
 
         self.preupgrade_deployment_id = self.deploy_hello_world('pre-')
