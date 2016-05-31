@@ -168,12 +168,10 @@ class ManagerUpgradeTest(TestCase):
         prefix = self.test_id
 
         ssh_key_filename = os.path.join(self.workdir, 'manager.key')
-        self.addCleanup(os.unlink, ssh_key_filename)
         self.addCleanup(self.env.handler.remove_keypair,
                         prefix + '-manager-key')
 
         agent_key_path = os.path.join(self.workdir, 'agents.key')
-        self.addCleanup(os.unlink, agent_key_path)
         self.addCleanup(self.env.handler.remove_keypair,
                         prefix + '-agents-key')
 
