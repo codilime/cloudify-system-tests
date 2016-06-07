@@ -35,8 +35,8 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
     def fail_rollback_manager(self):
         blueprint_path = self.get_upgrade_blueprint()
         rollback_inputs = self._get_fail_rollback_inputs()
-        self.upgrade_manager(blueprint=blueprint_path,
-                             inputs=rollback_inputs)
+        self.rollback_manager(blueprint=blueprint_path,
+                              inputs=rollback_inputs)
 
     def test_rollback_failure(self):
         """Upgrade, run rollback, fail in the middle, run rollback again
