@@ -249,7 +249,8 @@ class BaseManagerUpgradeTest(TestCase):
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
-            'elasticsearch_endpoint_port': 9900
+            'elasticsearch_endpoint_port': 9900,
+            'webui_source_url': 'http://repository.cloudifysource.org/org/cloudify3/3.4.0/m5-RELEASE/cloudify-ui-3.4.0-m5-b394.tgz'  # NOQA
 
         }
         upgrade_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
@@ -332,6 +333,7 @@ class BaseManagerUpgradeTest(TestCase):
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
+            'webui_source_url': 'http://repository.cloudifysource.org/org/cloudify3/3.4.0/m5-RELEASE/cloudify-ui-3.4.0-m5-b394.tgz'  # NOQA
         }
         rollback_inputs_file = self.manager_cfy._get_inputs_in_temp_file(
                 rollback_inputs, self._testMethodName)
