@@ -325,8 +325,9 @@ class BaseManagerUpgradeTest(TestCase):
     def uninstall_deployment(self, deployment_id):
         self.manager_cfy.execute_uninstall(deployment_id)
 
-    def rollback_manager(self):
-        rollback_inputs = {
+    def rollback_manager(self, blueprint=None, inputs=None):
+        blueprint = blueprint or self.upgrade_blueprint
+        rollback_inputs = inputs or {
             'private_ip': self.manager_private_ip,
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
@@ -337,7 +338,7 @@ class BaseManagerUpgradeTest(TestCase):
 
         with self.manager_cfy.maintenance_mode():
             self.manager_cfy.rollback_manager(
-                    blueprint_path=self.upgrade_blueprint,
+                    blueprint_path=blueprint,
                     inputs_file=rollback_inputs_file)
 
     def post_rollback_checks(self, preupgrade_deployment_id):
