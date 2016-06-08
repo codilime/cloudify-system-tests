@@ -16,12 +16,6 @@ from manager_upgrade_base import BaseManagerUpgradeTest
 
 
 class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
-    def _get_bootstrap_inputs(self):
-        rv = (super(ManagerRollbackIdempotencyTest, self)
-              ._get_bootstrap_inputs())
-        rv['webui_source_url'] = 'http://repository.cloudifysource.org/org/cloudify3/3.4.0/m5-RELEASE/cloudify-ui-3.4.0-m5-b394.tgz'  # NOQA
-        return rv
-
     def _get_fail_rollback_inputs(self):
         # The fake sanity app url will cause the upgrade to fail
         return {
@@ -29,8 +23,7 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
             'public_ip': self.upgrade_manager_ip,
             'ssh_key_filename': self.manager_inputs['ssh_key_filename'],
             'ssh_user': self.manager_inputs['ssh_user'],
-            'sanity_app_source_url': 'fake_path.tar.gz',
-            'webui_source_url': 'http://repository.cloudifysource.org/org/cloudify3/3.4.0/m5-RELEASE/cloudify-ui-3.4.0-m5-b394.tgz'  # NOQA
+            'sanity_app_source_url': 'fake_path.tar.gz'
         }
 
     def fail_rollback_manager(self):
