@@ -138,6 +138,7 @@ class BaseManagerUpgradeTest(TestCase):
         prefix = self.test_id
 
         ssh_key_filename, agent_key_path = self._get_keys(prefix)
+
         return {
             'keystone_username': self.env.keystone_username,
             'keystone_password': self.env.keystone_password,
@@ -169,7 +170,8 @@ class BaseManagerUpgradeTest(TestCase):
             'manager_security_group_name': prefix + '-m-sg',
             'agents_security_group_name': prefix + '-a-sg',
             'manager_port_name': prefix + '-port',
-            'management_subnet_dns_nameservers': ['8.8.8.8', '8.8.4.4']
+            'management_subnet_dns_nameservers': ['8.8.8.8', '8.8.4.4'],
+            'install_python_compilers': True
         }
 
     def get_bootstrap_blueprint(self):

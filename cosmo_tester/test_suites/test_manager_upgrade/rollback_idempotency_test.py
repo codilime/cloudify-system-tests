@@ -10,6 +10,9 @@
 #    * See the License for the specific language governing permissions and
 #    * limitations under the License.
 
+from contextlib import contextmanager
+from cStringIO import StringIO
+import json
 import sh
 
 from manager_upgrade_base import BaseManagerUpgradeTest
@@ -26,22 +29,52 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
             'sanity_app_source_url': 'fake_path.tar.gz'
         }
 
+    @contextmanager
+    def break_rollback(self):
+        fetched_properties = StringIO()
+        fetched_resources = StringIO()
+
+        with self._manager_fabric_env() as fabric:
+            fabric.get('/opt/cloudify/sanity/node_properties/properties.json',
+                       fetched_properties)
+            properties = json.load(fetched_properties)
+            fabric.get('/opt/cloudify/sanity/resources/__resources.json',
+                       fetched_resources)
+            resources = json.load(fetched_resources)
+            modified_properties = {'sanity_app_source_url': 'fake.tar.gz'}
+            modified_resources = {'fake.tar.gz': 'fake.tar.gz'}
+
+            fabric.put(
+                '/opt/cloudify/sanity/node_properties/properties.json',
+                StringIO(json.dumps(modified_properties)))
+            fabric.put(
+                '/opt/cloudify/sanity/resources/__resources.json',
+                StringIO(json.dumps(modified_resources)))
+            yield
+            fabric.put(
+                '/opt/cloudify/sanity/node_properties/properties.json',
+                StringIO(json.dumps(properties)))
+            fabric.put(
+                '/opt/cloudify/sanity/resources/__resources.json',
+                StringIO(json.dumps(resources)))
+
     def fail_rollback_manager(self):
-        blueprint_path = self.get_upgrade_blueprint()
-        rollback_inputs = self._get_fail_rollback_inputs()
-        self.rollback_manager(blueprint=blueprint_path,
-                              inputs=rollback_inputs)
+        with self.break_rollback():
+            self.rollback_manager()
 
     def test_rollback_failure(self):
         """Upgrade, run rollback, fail in the middle, run rollback again
         and verify rollback complete.
         """
         import pudb; pu.db  # NOQA
-        self.prepare_manager()
-        preupgrade_deployment_id = self.deploy_hello_world('pre-')
+        # self.prepare_manager()
+        # preupgrade_deployment_id = self.deploy_hello_world('pre-')
 
-        self.upgrade_manager()
-        self.post_upgrade_checks(preupgrade_deployment_id)
+        # self.upgrade_manager()
+        # self.post_upgrade_checks(preupgrade_deployment_id)
+        self.manager_inputs = self._get_bootstrap_inputs()
+        self.manager_private_ip = '172.16.0.3'
+        self.upgrade_manager_ip = '185.98.149.79'
 
         try:
             self.fail_rollback_manager()
@@ -50,9 +83,9 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
         else:
             self.fail(msg='Rollback expected to fail')
 
-        self.rollback_manager()
-        self.post_rollback_checks(preupgrade_deployment_id)
-        self.teardown_manager()
+        # self.rollback_manager()
+        # self.post_rollback_checks(preupgrade_deployment_id)
+        # self.teardown_manager()
 
     def test_rollback_twice(self):
         """Upgrade, run rollback, finish, run rollback again and see that
