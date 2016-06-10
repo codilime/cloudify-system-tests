@@ -19,11 +19,11 @@ import json
 from mock import patch
 import sh
 import shutil
-import tempfile
 
 from cosmo_tester.framework.testenv import bootstrap, teardown
 from cosmo_tester.framework.testenv import TestCase
 from cosmo_tester.framework.git_helper import clone
+from cosmo_tester.framework.util import YamlPatcher
 
 
 def setUp():
@@ -40,13 +40,13 @@ UPGRADE_BRANCH = 'master'
 
 
 class TestManagerPreupgradeValidations(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.shared_workdir = tempfile.mkdtemp(prefix='manager-upgrade-')
-        cls.blueprint_dir = clone(UPGRADE_REPO_URL, cls.shared_workdir,
-                                  branch=UPGRADE_BRANCH)
-        cls.blueprint_path = (cls.blueprint_dir /
-                              'simple-manager-blueprint.yaml')
+    def get_simple_blueprint(self):
+        blueprint_dir = clone(UPGRADE_REPO_URL, self.workdir,
+                              branch=UPGRADE_BRANCH)
+        blueprint_path = (blueprint_dir /
+                          'simple-manager-blueprint.yaml')
+        self.addCleanup(shutil.rmtree, blueprint_dir)
+        return blueprint_path
 
     def get_upgrade_inputs(self, **override):
         inputs = {
@@ -58,16 +58,11 @@ class TestManagerPreupgradeValidations(TestCase):
         inputs.update(override)
         return self.cfy._get_inputs_in_temp_file(inputs, 'upgrade')
 
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.shared_workdir)
-
     def test_default_validations(self):
-        import pudb; pu.db  # NOQA
         inputs = self.get_upgrade_inputs()
         with self.cfy.maintenance_mode():
             self.cfy.upgrade_manager(
-                blueprint_path=self.blueprint_path,
+                blueprint_path=self.get_simple_blueprint(),
                 inputs_file=inputs,
                 validate_only=True)
 
@@ -89,18 +84,45 @@ class TestManagerPreupgradeValidations(TestCase):
                 fabric.put(fetched_properties, es_properties_path)
 
     def test_elasticsearch_up(self):
-        import pudb; pu.db  # NOQA
+        """
+        """
         inputs = self.get_upgrade_inputs()
         with self.change_es_port(), self.cfy.maintenance_mode(),\
                 patch('sys.stdout', new_callable=StringIO) as mock_stdout:
             try:
                 self.cfy.upgrade_manager(
-                    blueprint_path=self.blueprint_path,
+                    blueprint_path=self.get_simple_blueprint(),
                     inputs_file=inputs,
                     validate_only=True)
             except sh.ErrorReturnCode:
                 self.assertIn(
                     'ES returned an error when getting the provider context',
+                    mock_stdout.getvalue())
+            else:
+                self.fail('ES validation should have failed')
+
+    def test_elasticsearch_memory(self):
+        blueprint_path = self.get_simple_blueprint()
+        with YamlPatcher(blueprint_path) as yamlpatch:
+                yamlpatch.set_value(
+                    ('node_templates.elasticsearch.properties'
+                     '.use_existing_on_upgrade'),
+                    False)
+
+        # set a heap size lower than what's currently used: just pass 1MB,
+        # which surely must be lower than whatever the manager is
+        # currently using!
+        inputs = self.get_upgrade_inputs(elasticsearch_heap_size='1m')
+        with self.cfy.maintenance_mode(),\
+                patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            try:
+                self.cfy.upgrade_manager(
+                    blueprint_path=blueprint_path,
+                    inputs_file=inputs,
+                    validate_only=True)
+            except sh.ErrorReturnCode:
+                self.assertIn(
+                    'Elasticsearch Heap Size',
                     mock_stdout.getvalue())
             else:
                 self.fail('ES validation should have failed')
