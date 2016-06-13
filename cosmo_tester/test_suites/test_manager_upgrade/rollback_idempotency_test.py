@@ -12,8 +12,10 @@
 
 from contextlib import contextmanager
 from cStringIO import StringIO
+from fabric.network import disconnect_all
 import json
 import sh
+
 
 from manager_upgrade_base import BaseManagerUpgradeTest
 
@@ -23,7 +25,7 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
     def break_rollback(self):
         fetched_properties = StringIO()
         fetched_resources = StringIO()
-        # TODO I think we also need rollback_node_properties
+
         properties_path = \
             '/opt/cloudify/sanity/node_properties_rollback/properties.json'
         resources_path = '/opt/cloudify/sanity/resources_rollback/__resources.json'
@@ -42,7 +44,14 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
             fabric.put(StringIO(json.dumps(properties)), properties_path)
             fabric.put(StringIO(json.dumps(resources)), resources_path)
 
-        yield
+        disconnect_all()
+        try:
+            yield
+        finally:
+
+            with self._manager_fabric_env() as fabric:
+                fabric.put(fetched_properties, '/opt/cloudify/sanity/node_properties/properties.json')
+                fabric.put(fetched_resources, '/opt/cloudify/sanity/resources/__resources.json')
 
     def fail_rollback_manager(self):
         with self.break_rollback():
