@@ -15,10 +15,13 @@
 
 from contextlib import contextmanager
 from cStringIO import StringIO
+from fabric.context_managers import quiet
 import json
 from mock import patch
+import os
 import sh
 import shutil
+import time
 
 from cosmo_tester.framework.testenv import bootstrap, teardown
 from cosmo_tester.framework.testenv import TestCase
@@ -126,3 +129,90 @@ class TestManagerPreupgradeValidations(TestCase):
                     mock_stdout.getvalue())
             else:
                 self.fail('ES validation should have failed')
+
+    @contextmanager
+    def disable_service(self, service_name):
+        with self.manager_env_fabric() as fabric:
+            fabric.sudo('systemctl stop {0}'.format(service_name))
+
+        try:
+            yield
+        finally:
+            with self.manager_env_fabric() as fabric, quiet():
+                fabric.sudo('systemctl start {0}'.format(service_name))
+                while True:
+                    status = fabric.sudo('systemctl status {0}'.format(
+                        service_name))
+                    if status.return_code == 0:
+                        break
+                    time.sleep(1)
+
+    def test_service_alive_checks(self):
+        blueprint_path = self.get_simple_blueprint()
+        inputs = self.get_upgrade_inputs()
+
+        with self.cfy.maintenance_mode():
+            for service_name, display_name in [
+                ('cloudify-mgmtworker', 'mgmtworker'),
+                ('logstash', 'logstash'),
+                ('elasticsearch', 'elasticsearch')
+            ]:
+                with self.disable_service(service_name):
+                    try:
+                        with patch('sys.stdout', new_callable=StringIO) \
+                                as mock_stdout:
+                            self.cfy.upgrade_manager(
+                                blueprint_path=blueprint_path,
+                                inputs_file=inputs,
+                                validate_only=True)
+                    except sh.ErrorReturnCode:
+                        self.assertIn(
+                            '{0} is not running'.format(display_name),
+                            mock_stdout.getvalue().lower())
+                    else:
+                        self.fail('should have failed')
+
+    @contextmanager
+    def move_upgrade_dirs(self, node_name):
+        base = os.path.join('/opt/cloudify', node_name)
+        properties_dir = os.path.join(base, 'node_properties')
+        properties_dir_backup = os.path.join(base, 'node_properties_backup')
+        resources_dir = os.path.join(base, 'resources')
+        resources_dir_backup = os.path.join(base, 'resources_backup')
+
+        with self.manager_env_fabric() as fabric:
+            fabric.sudo('mv {0} {1}'.format(properties_dir,
+                                            properties_dir_backup))
+            fabric.sudo('mv {0} {1}'.format(resources_dir,
+                                            resources_dir_backup))
+
+        try:
+            yield
+        finally:
+            with self.manager_env_fabric() as fabric:
+                fabric.sudo('mv {0} {1}'.format(properties_dir_backup,
+                                                properties_dir))
+                fabric.sudo('mv {0} {1}'.format(resources_dir_backup,
+                                                resources_dir))
+
+    def test_node_directories(self):
+        blueprint_path = self.get_simple_blueprint()
+        inputs = self.get_upgrade_inputs()
+
+        with self.cfy.maintenance_mode():
+            for node_name in ['nginx']:
+                with self.move_upgrade_dirs(node_name):
+                    try:
+                        with patch('sys.stdout', new_callable=StringIO) \
+                                as mock_stdout:
+                            self.cfy.upgrade_manager(
+                                blueprint_path=blueprint_path,
+                                inputs_file=inputs,
+                                validate_only=True)
+                    except sh.ErrorReturnCode:
+                        self.assertIn(
+                            'service {0} has no properties file'.format(
+                                node_name),
+                            mock_stdout.getvalue().lower())
+                    else:
+                        self.fail('should have failed')
