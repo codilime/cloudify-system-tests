@@ -25,8 +25,8 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
         fetched_resources = StringIO()
         # TODO I think we also need rollback_node_properties
         properties_path = \
-            '/opt/cloudify/sanity/node_properties/properties.json'
-        resources_path = '/opt/cloudify/sanity/resources/__resources.json'
+            '/opt/cloudify/sanity/node_properties_rollback/properties.json'
+        resources_path = '/opt/cloudify/sanity/resources_rollback/__resources.json'
 
         with self._manager_fabric_env() as fabric:
             fabric.get(properties_path, fetched_properties)
@@ -42,11 +42,7 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
             fabric.put(StringIO(json.dumps(properties)), properties_path)
             fabric.put(StringIO(json.dumps(resources)), resources_path)
 
-            try:
-                yield
-            finally:
-                fabric.put(fetched_properties, properties_path)
-                fabric.put(fetched_resources, resources_path)
+        yield
 
     def fail_rollback_manager(self):
         with self.break_rollback():
