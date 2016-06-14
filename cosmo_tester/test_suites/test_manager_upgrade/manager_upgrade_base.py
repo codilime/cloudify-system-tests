@@ -50,12 +50,13 @@ class BaseManagerUpgradeTest(TestCase):
         return 'upgrade_manager' in self.env.handler_configuration
 
     @contextmanager
-    def _manager_fabric_env(self):
+    def _manager_fabric_env(self, **kwargs):
         inputs = self.manager_inputs
         with fabric.context_managers.settings(
                 host_string=self.upgrade_manager_ip,
                 user=inputs['ssh_user'],
-                key_filename=inputs['ssh_key_filename']):
+                key_filename=inputs['ssh_key_filename'],
+                **kwargs):
             yield fabric.api
 
     def _bootstrap_local_env(self, workdir):
