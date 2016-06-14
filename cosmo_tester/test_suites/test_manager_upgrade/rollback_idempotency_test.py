@@ -12,25 +12,41 @@
 
 from contextlib import contextmanager
 from cStringIO import StringIO
-from fabric.network import disconnect_all
 import json
+from mock import patch
 import sh
+from path import path
 
 
 from manager_upgrade_base import BaseManagerUpgradeTest
 
-
+from cosmo_tester.framework.util import sh_bake
 class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
+    """Rollback is idempotent - nothing will break if we run it several times.
+
+    In case of rollback breaking (randomly, due to eg. network outages),
+    we should be able to simply re-run it to finish the rollback procedure.
+    """
+
     @contextmanager
     def break_rollback(self):
+        """Make sure the sanity test on the manager fails during rollback.
+
+        To do this, we'd like to change the sanity app url to a nonexistent
+        one. Note however that rollback will use the url that is stored
+        on the manager in the rollback properties file, so we need to
+        alter that file.
+        """
+        base_dir = path('/opt/cloudify/sanity')
         fetched_properties = StringIO()
         fetched_resources = StringIO()
 
-        properties_path = \
-            '/opt/cloudify/sanity/node_properties_rollback/properties.json'
-        resources_path = '/opt/cloudify/sanity/resources_rollback/__resources.json'
+        properties_path = base_dir / 'node_properties_rollback/properties.json'
+        resources_path = base_dir / 'resources_rollback/__resources.json'
 
-        with self._manager_fabric_env() as fabric:
+        # keepalive so that the connection is also responsive after the
+        # rollback, which might take a long time
+        with self._manager_fabric_env(keepalive=30) as fabric:
             fabric.get(properties_path, fetched_properties)
             properties = json.loads(fetched_properties.getvalue())
 
@@ -38,22 +54,25 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
             resources = json.loads(fetched_resources.getvalue())
 
             properties['sanity_app_source_url'] = 'fake.tar.gz'
-
             resources['fake.tar.gz'] = 'fake.tar.gz'
 
             fabric.put(StringIO(json.dumps(properties)), properties_path)
             fabric.put(StringIO(json.dumps(resources)), resources_path)
 
-        disconnect_all()
         try:
             yield
         finally:
-
-            with self._manager_fabric_env() as fabric:
-                fabric.put(fetched_properties, '/opt/cloudify/sanity/node_properties/properties.json')
-                fabric.put(fetched_resources, '/opt/cloudify/sanity/resources/__resources.json')
+            # now we need to restore the original, correct values: but by
+            # this time, the properties were moved to the non-rollback
+            # storage directories
+            with self._manager_fabric_env(keepalive=30) as fabric:
+                fabric.put(fetched_properties,
+                           base_dir / 'node_properties/properties.json')
+                fabric.put(fetched_resources,
+                           base_dir / 'resources/__resources.json')
 
     def fail_rollback_manager(self):
+        """Run a rollback, ensuring it will fail on the sanity test phase."""
         with self.break_rollback():
             self.rollback_manager()
 
@@ -62,6 +81,7 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
         and verify rollback complete.
         """
         import pudb; pu.db  # NOQA
+
         self.prepare_manager()
         preupgrade_deployment_id = self.deploy_hello_world('pre-')
 
@@ -69,7 +89,8 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
         self.post_upgrade_checks(preupgrade_deployment_id)
 
         try:
-            self.fail_rollback_manager()
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                self.fail_rollback_manager()
         except sh.ErrorReturnCode:
             pass
         else:

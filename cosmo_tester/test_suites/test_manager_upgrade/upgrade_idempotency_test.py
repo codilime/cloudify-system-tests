@@ -51,7 +51,6 @@ class ManagerUpgradeIdempotencyTest(BaseManagerUpgradeTest):
         self.upgrade_manager()
         self.post_upgrade_checks(preupgrade_deployment_id)
         self.teardown_manager()
-        return
 
     def fail_upgrade_manager(self):
         blueprint_path = self.get_upgrade_blueprint()
