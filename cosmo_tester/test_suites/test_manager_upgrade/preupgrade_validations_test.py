@@ -152,10 +152,16 @@ class TestManagerPreupgradeValidations(TestCase):
         inputs = self.get_upgrade_inputs()
 
         with self.cfy.maintenance_mode():
+            # we can't test nginx or the restservice this way, because if we
+            # turn them off, we won't be able to execute the upgrade :)
             for service_name, display_name in [
                 ('cloudify-mgmtworker', 'mgmtworker'),
                 ('logstash', 'logstash'),
-                ('elasticsearch', 'elasticsearch')
+                ('elasticsearch', 'elasticsearch'),
+                ('cloudify-amqpinflux', 'amqpinflux'),
+                ('cloudify-riemann', 'riemann'),
+                ('cloudify-amqpinflux', 'amqpinflux'),
+                ('cloudify-influxdb', 'influxdb')
             ]:
                 with self.disable_service(service_name):
                     try:
@@ -200,7 +206,19 @@ class TestManagerPreupgradeValidations(TestCase):
         inputs = self.get_upgrade_inputs()
 
         with self.cfy.maintenance_mode():
-            for node_name in ['nginx']:
+            for node_name in [
+                'influxdb',
+                'rabbitmq',
+                'elasticsearch',
+                'amqpinflux',
+                'logstash',
+                'restservice',
+                'webui',
+                'nginx',
+                'riemann',
+                'mgmtworker',
+                'sanity'
+            ]:
                 with self.move_upgrade_dirs(node_name):
                     try:
                         with patch('sys.stdout', new_callable=StringIO) \
@@ -215,4 +233,42 @@ class TestManagerPreupgradeValidations(TestCase):
                                 node_name),
                             mock_stdout.getvalue().lower())
                     else:
-                        self.fail('should have failed')
+                        self.fail('Upgrade directories validation for {0} '
+                                  'succeeded, but it should have failed - '
+                                  'node properties and rollback directories '
+                                  'are missing'.format(node_name))
+
+    def get_node_properties(self, node_name):
+        fetched_properties = StringIO()
+        properties_path = os.path.join('/opt/cloudify', node_name,
+                                       'node_properties/properties.json')
+        with self.manager_env_fabric() as fabric:
+            fabric.get(properties_path, fetched_properties)
+        fetched_properties.seek(0)
+        return json.load(fetched_properties)
+
+    def test_rabbit_credentials_changed(self):
+        import pudb; pu.db  # NOQA
+
+        rabbitmq_properties = self.get_node_properties('rabbitmq')
+        blueprint_path = self.get_simple_blueprint()
+        with YamlPatcher(blueprint_path) as yamlpatch:
+                yamlpatch.set_value(
+                    ('node_templates.rabbitmq.properties'
+                     '.use_existing_on_upgrade'),
+                    False)
+
+        new_password = rabbitmq_properties['rabbitmq_password'] + '-changed'
+        inputs = self.get_upgrade_inputs(rabbitmq_password=new_password)
+
+        with self.cfy.maintenance_mode(),\
+                patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            try:
+                self.cfy.upgrade_manager(
+                    blueprint_path=blueprint_path,
+                    inputs_file=inputs,
+                    validate_only=True)
+            except sh.ErrorReturnCode:
+                pass
+            else:
+                self.fail('rabbitmq validation should have failed')
