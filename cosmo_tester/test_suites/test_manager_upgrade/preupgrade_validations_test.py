@@ -17,7 +17,6 @@ from contextlib import contextmanager
 from cStringIO import StringIO
 from fabric.context_managers import quiet
 import json
-from mock import patch
 import os
 import sh
 import shutil
@@ -37,9 +36,9 @@ def tearDown():
     teardown()
 
 
-UPGRADE_REPO_URL = 'https://github.com/cloudify-cosmo/' \
+UPGRADE_REPO_URL = 'https://github.com/codilime/' \
                    'cloudify-manager-blueprints.git'
-UPGRADE_BRANCH = 'master'
+UPGRADE_BRANCH = 'validation-fixups'
 
 
 class TestManagerPreupgradeValidations(TestCase):
@@ -90,17 +89,16 @@ class TestManagerPreupgradeValidations(TestCase):
         """
         """
         inputs = self.get_upgrade_inputs()
-        with self.change_es_port(), self.cfy.maintenance_mode(),\
-                patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+        with self.change_es_port(), self.cfy.maintenance_mode():
             try:
                 self.cfy.upgrade_manager(
                     blueprint_path=self.get_simple_blueprint(),
                     inputs_file=inputs,
                     validate_only=True)
-            except sh.ErrorReturnCode:
+            except sh.ErrorReturnCode as e:
                 self.assertIn(
                     'ES returned an error when getting the provider context',
-                    mock_stdout.getvalue())
+                    e.stdout)
             else:
                 self.fail('ES validation should have failed')
 
@@ -116,17 +114,16 @@ class TestManagerPreupgradeValidations(TestCase):
         # which surely must be lower than whatever the manager is
         # currently using!
         inputs = self.get_upgrade_inputs(elasticsearch_heap_size='1m')
-        with self.cfy.maintenance_mode(),\
-                patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+        with self.cfy.maintenance_mode():
             try:
                 self.cfy.upgrade_manager(
                     blueprint_path=blueprint_path,
                     inputs_file=inputs,
                     validate_only=True)
-            except sh.ErrorReturnCode:
+            except sh.ErrorReturnCode as e:
                 self.assertIn(
                     'Elasticsearch Heap Size',
-                    mock_stdout.getvalue())
+                    e.stdout)
             else:
                 self.fail('ES validation should have failed')
 
@@ -165,16 +162,14 @@ class TestManagerPreupgradeValidations(TestCase):
             ]:
                 with self.disable_service(service_name):
                     try:
-                        with patch('sys.stdout', new_callable=StringIO) \
-                                as mock_stdout:
-                            self.cfy.upgrade_manager(
-                                blueprint_path=blueprint_path,
-                                inputs_file=inputs,
-                                validate_only=True)
-                    except sh.ErrorReturnCode:
+                        self.cfy.upgrade_manager(
+                            blueprint_path=blueprint_path,
+                            inputs_file=inputs,
+                            validate_only=True)
+                    except sh.ErrorReturnCode as e:
                         self.assertIn(
                             '{0} is not running'.format(display_name),
-                            mock_stdout.getvalue().lower())
+                            e.stdout.lower())
                     else:
                         self.fail('should have failed')
 
@@ -213,25 +208,21 @@ class TestManagerPreupgradeValidations(TestCase):
                 'amqpinflux',
                 'logstash',
                 'restservice',
-                'webui',
                 'nginx',
                 'riemann',
                 'mgmtworker',
-                'sanity'
             ]:
                 with self.move_upgrade_dirs(node_name):
                     try:
-                        with patch('sys.stdout', new_callable=StringIO) \
-                                as mock_stdout:
-                            self.cfy.upgrade_manager(
-                                blueprint_path=blueprint_path,
-                                inputs_file=inputs,
-                                validate_only=True)
-                    except sh.ErrorReturnCode:
+                        self.cfy.upgrade_manager(
+                            blueprint_path=blueprint_path,
+                            inputs_file=inputs,
+                            validate_only=True)
+                    except sh.ErrorReturnCode as e:
                         self.assertIn(
                             'service {0} has no properties file'.format(
                                 node_name),
-                            mock_stdout.getvalue().lower())
+                            e.stdout.lower())
                     else:
                         self.fail('Upgrade directories validation for {0} '
                                   'succeeded, but it should have failed - '
@@ -248,8 +239,6 @@ class TestManagerPreupgradeValidations(TestCase):
         return json.load(fetched_properties)
 
     def test_rabbit_credentials_changed(self):
-        import pudb; pu.db  # NOQA
-
         rabbitmq_properties = self.get_node_properties('rabbitmq')
         blueprint_path = self.get_simple_blueprint()
         with YamlPatcher(blueprint_path) as yamlpatch:
@@ -261,14 +250,14 @@ class TestManagerPreupgradeValidations(TestCase):
         new_password = rabbitmq_properties['rabbitmq_password'] + '-changed'
         inputs = self.get_upgrade_inputs(rabbitmq_password=new_password)
 
-        with self.cfy.maintenance_mode(),\
-                patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+        with self.cfy.maintenance_mode():
             try:
                 self.cfy.upgrade_manager(
                     blueprint_path=blueprint_path,
                     inputs_file=inputs,
                     validate_only=True)
-            except sh.ErrorReturnCode:
-                pass
+            except sh.ErrorReturnCode as e:
+                self.assertIn('rabbitmq properties must not change',
+                              e.stdout.lower())
             else:
                 self.fail('rabbitmq validation should have failed')

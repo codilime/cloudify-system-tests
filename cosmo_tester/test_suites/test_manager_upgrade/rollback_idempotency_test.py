@@ -13,14 +13,13 @@
 from contextlib import contextmanager
 from cStringIO import StringIO
 import json
-from mock import patch
 import sh
 from path import path
 
 
 from manager_upgrade_base import BaseManagerUpgradeTest
 
-from cosmo_tester.framework.util import sh_bake
+
 class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
     """Rollback is idempotent - nothing will break if we run it several times.
 
@@ -44,9 +43,7 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
         properties_path = base_dir / 'node_properties_rollback/properties.json'
         resources_path = base_dir / 'resources_rollback/__resources.json'
 
-        # keepalive so that the connection is also responsive after the
-        # rollback, which might take a long time
-        with self._manager_fabric_env(keepalive=30) as fabric:
+        with self._manager_fabric_env() as fabric:
             fabric.get(properties_path, fetched_properties)
             properties = json.loads(fetched_properties.getvalue())
 
@@ -65,7 +62,7 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
             # now we need to restore the original, correct values: but by
             # this time, the properties were moved to the non-rollback
             # storage directories
-            with self._manager_fabric_env(keepalive=30) as fabric:
+            with self._manager_fabric_env() as fabric:
                 fabric.put(fetched_properties,
                            base_dir / 'node_properties/properties.json')
                 fabric.put(fetched_resources,
@@ -89,10 +86,9 @@ class ManagerRollbackIdempotencyTest(BaseManagerUpgradeTest):
         self.post_upgrade_checks(preupgrade_deployment_id)
 
         try:
-            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
-                self.fail_rollback_manager()
-        except sh.ErrorReturnCode:
-            pass
+            self.fail_rollback_manager()
+        except sh.ErrorReturnCode as e:
+            print e.stdout
         else:
             self.fail(msg='Rollback expected to fail')
 

@@ -52,11 +52,14 @@ class BaseManagerUpgradeTest(TestCase):
     @contextmanager
     def _manager_fabric_env(self, **kwargs):
         inputs = self.manager_inputs
-        with fabric.context_managers.settings(
-                host_string=self.upgrade_manager_ip,
-                user=inputs['ssh_user'],
-                key_filename=inputs['ssh_key_filename'],
-                **kwargs):
+        settings = {
+            'host_string': self.upgrade_manager_ip,
+            'user': inputs['ssh_user'],
+            'key_filename': inputs['ssh_key_filename'],
+            'keepalive': 30,
+        }
+        settings.update(kwargs)
+        with fabric.context_managers.settings(**settings):
             yield fabric.api
 
     def _bootstrap_local_env(self, workdir):
