@@ -33,10 +33,6 @@ from cosmo_tester.framework.util import (sh_bake,
                                          download_file)
 
 
-cfy = sh_bake(sh.cfy)
-cfy_out = sh.cfy
-
-
 DEFAULT_EXECUTE_TIMEOUT = 1800
 INPUTS = 'inputs'
 PARAMETERS = 'parameters'
@@ -49,7 +45,10 @@ class CfyHelper(object):
                  management_ip=None,
                  management_user=None,
                  management_key=None,
-                 management_port='22'):
+                 management_port='22',
+                 executable=sh.cfy):
+        self._executable = sh_bake(executable)
+        self._executable_out = executable
         self.logger = logging.getLogger('TESTENV')
         self.logger.setLevel(logging.INFO)
         self._cfy_workdir = cfy_workdir
@@ -83,7 +82,7 @@ class CfyHelper(object):
                   verbose=False,
                   debug=False):
         with self.workdir:
-            cfy.init(reset_config=reset_config).wait()
+            self._executable.init(reset_config=reset_config).wait()
 
             with YamlPatcher(get_configuration_path()) as patch:
                 prop_path = ('local_provider_context.'
@@ -93,7 +92,7 @@ class CfyHelper(object):
             if not inputs_file:
                 inputs_file = self._get_inputs_in_temp_file({}, 'manager')
 
-            cfy.bootstrap(
+            self._executable.bootstrap(
                 blueprint_path=blueprint_path,
                 inputs=inputs_file,
                 install_plugins=install_plugins,
@@ -136,21 +135,21 @@ class CfyHelper(object):
         for wagon in downloaded_wagon_paths:
             with self.workdir:
                 self.logger.info('Uploading {0}'.format(wagon))
-                upload = cfy.plugins.upload(p=wagon, verbose=True)
+                upload = self._executable.plugins.upload(p=wagon, verbose=True)
                 upload.wait()
 
     def recover(self, snapshot_path, task_retries=5):
         with self.workdir:
-            cfy.recover(force=True,
-                        task_retries=task_retries,
-                        snapshot_path=snapshot_path).wait()
+            self._executable.recover(force=True,
+                                     task_retries=task_retries,
+                                     snapshot_path=snapshot_path).wait()
 
     def create_snapshot(self,
                         snapshot_id,
                         include_metrics=False,
                         exclude_credentials=False):
         with self.workdir:
-            cfy.snapshots.create(
+            self._executable.snapshots.create(
                 snapshot_id=snapshot_id,
                 include_metrics=include_metrics,
                 exclude_credentials=exclude_credentials).wait()
@@ -158,7 +157,7 @@ class CfyHelper(object):
     def download_snapshot(self, snapshot_id, output_path=''):
 
         with self.workdir:
-            cfy.snapshots.download(
+            self._executable.snapshots.download(
                 snapshot_id=snapshot_id,
                 output=output_path).wait()
 
@@ -166,7 +165,7 @@ class CfyHelper(object):
                  ignore_deployments=True,
                  verbose=False):
         with self.workdir:
-            cfy.teardown(
+            self._executable.teardown(
                 ignore_deployments=ignore_deployments,
                 force=True,
                 verbose=verbose).wait()
@@ -177,13 +176,11 @@ class CfyHelper(object):
         parameters = self._get_parameters_in_temp_file(parameters, workflow_id)
 
         with self.workdir:
-            cfy.uninstall(deployment_id=deployment_id,
-                          workflow=workflow_id,
-                          parameters=parameters,
-                          allow_custom_parameters=allow_custom_parameters,
-                          timeout=timeout,
-                          include_logs=include_logs
-                          ).wait()
+            self._executable.uninstall(
+                deployment_id=deployment_id, workflow=workflow_id,
+                parameters=parameters,
+                allow_custom_parameters=allow_custom_parameters,
+                timeout=timeout, include_logs=include_logs).wait()
 
     def install(
             self,
@@ -198,13 +195,13 @@ class CfyHelper(object):
         inputs_file = self._get_inputs_in_temp_file(inputs, deployment_id)
 
         with self.workdir:
-            cfy.install(blueprint_path=blueprint_path,
-                        blueprint_id=blueprint_id,
-                        deployment_id=deployment_id,
-                        inputs=inputs_file,
-                        timeout=execute_timeout,
-                        include_logs=include_logs,
-                        verbose=verbose).wait()
+            self._executable.install(blueprint_path=blueprint_path,
+                                     blueprint_id=blueprint_id,
+                                     deployment_id=deployment_id,
+                                     inputs=inputs_file,
+                                     timeout=execute_timeout,
+                                     include_logs=include_logs,
+                                     verbose=verbose).wait()
 
     upload_deploy_and_execute_install = install
 
@@ -213,7 +210,7 @@ class CfyHelper(object):
                         archive_location,
                         verbose=False):
         with self.workdir:
-            cfy.blueprints.publish_archive(
+            self._executable.blueprints.publish_archive(
                 blueprint_id=blueprint_id,
                 archive_location=archive_location,
                 blueprint_filename='blueprint.yaml',
@@ -226,7 +223,7 @@ class CfyHelper(object):
                           inputs=None):
         with self.workdir:
             inputs_file = self._get_inputs_in_temp_file(inputs, deployment_id)
-            cfy.deployments.create(
+            self._executable.deployments.create(
                 blueprint_id=blueprint_id,
                 deployment_id=deployment_id,
                 verbose=verbose,
@@ -236,7 +233,7 @@ class CfyHelper(object):
                           verbose=False,
                           ignore_live_nodes=False):
         with self.workdir:
-            cfy.deployments.delete(
+            self._executable.deployments.delete(
                 deployment_id=deployment_id,
                 ignore_live_nodes=ignore_live_nodes,
                 verbose=verbose).wait()
@@ -244,25 +241,25 @@ class CfyHelper(object):
     def delete_blueprint(self, blueprint_id,
                          verbose=False):
         with self.workdir:
-            cfy.blueprints.delete(
+            self._executable.blueprints.delete(
                 blueprint_id=blueprint_id,
                 verbose=verbose).wait()
 
     def list_blueprints(self, verbose=False):
         with self.workdir:
-            cfy.blueprints.list(verbose=verbose).wait()
+            self._executable.blueprints.list(verbose=verbose).wait()
 
     def list_deployments(self, verbose=False):
         with self.workdir:
-            cfy.deployments.list(verbose=verbose).wait()
+            self._executable.deployments.list(verbose=verbose).wait()
 
     def list_executions(self, verbose=False):
         with self.workdir:
-            cfy.executions.list(verbose=verbose).wait()
+            self._executable.executions.list(verbose=verbose).wait()
 
     def list_events(self, execution_id, verbosity='', include_logs=True):
         with self.workdir:
-            command = cfy_out.events.list.bake(
+            command = self._executable_out.events.list.bake(
                 execution_id=execution_id,
                 include_logs=include_logs)
             if verbosity:
@@ -271,12 +268,12 @@ class CfyHelper(object):
 
     def get_blueprint(self, blueprint_id, verbose=False):
         with self.workdir:
-            cfy.blueprints.get(
+            self._executable.blueprints.get(
                 blueprint_id=blueprint_id, verbose=verbose).wait()
 
     def get_deployment(self, deployment_id, verbose=False):
         with self.workdir:
-            cfy.deployments.get(
+            self._executable.deployments.get(
                 deployment_id=deployment_id, verbose=verbose).wait()
 
     def update_deployment(self,
@@ -314,17 +311,17 @@ class CfyHelper(object):
             deployment_update_kwargs['json'] = json
 
         with self.workdir:
-            cfy.deployments.update(deployment_id=deployment_id,
-                                   **deployment_update_kwargs)
+            self._executable.deployments.update(
+                deployment_id=deployment_id, **deployment_update_kwargs)
 
     def get_execution(self, execution_id, verbose=False):
         with self.workdir:
-            cfy.executions.get(
+            self._executable.executions.get(
                 execution_id=execution_id, verbose=verbose).wait()
 
     def cancel_execution(self, execution_id, verbose=False):
         with self.workdir:
-            cfy.executions.cancel(
+            self._executable.executions.cancel(
                 execution_id=execution_id, verbose=verbose).wait()
 
     def execute_install(self,
@@ -356,23 +353,24 @@ class CfyHelper(object):
                          blueprint_path,
                          verbose=False):
         with self.workdir:
-            cfy.blueprints.upload(
+            self._executable.blueprints.upload(
                 blueprint_path=blueprint_path,
                 blueprint_id=blueprint_id,
                 verbose=verbose).wait()
 
     def download_blueprint(self, blueprint_id):
         with self.workdir:
-            cfy.blueprints.download(blueprint_id=blueprint_id).wait()
+            self._executable.blueprints.download(
+                blueprint_id=blueprint_id).wait()
 
     def download_plugin(self, plugin_id, output_file):
         with self.workdir:
-            cfy.plugins.download(plugin_id=plugin_id, output=output_file)\
-                .wait()
+            self._executable.plugins.download(
+                plugin_id=plugin_id, output=output_file).wait()
 
     def use(self, management_ip):
         with self.workdir:
-            cfy.use(management_ip=management_ip).wait()
+            self._executable.use(management_ip=management_ip).wait()
 
     def get_management_ip(self):
         with self.workdir:
@@ -392,8 +390,8 @@ class CfyHelper(object):
 
     def install_agents(self, deployment_id=None, include_logs=False):
         with self.workdir:
-            cfy.agents.install(deployment_id=deployment_id,
-                               include_logs=include_logs).wait()
+            self._executable.agents.install(deployment_id=deployment_id,
+                                            include_logs=include_logs).wait()
 
     def close(self):
         if self.tmpdir:
@@ -409,7 +407,7 @@ class CfyHelper(object):
 
         params_file = self._get_parameters_in_temp_file(parameters, workflow)
         with self.workdir:
-            cfy.executions.start(
+            self._executable.executions.start(
                 workflow=workflow,
                 deployment_id=deployment_id,
                 timeout=execute_timeout,
@@ -419,31 +417,31 @@ class CfyHelper(object):
 
     def download_logs(self, output=os.getcwd()):
         with self.workdir:
-            cfy.logs.download(
+            self._executable.logs.download(
                 output=output,
                 verbose=True).wait()
 
     def purge_logs(self, force=True, backup_first=False):
         with self.workdir:
-            cfy.logs.purge(
+            self._executable.logs.purge(
                 force=force,
                 backup_first=backup_first,
                 verbose=True).wait()
 
     def backup_logs(self):
         with self.workdir:
-            cfy.logs.backup(verbose=True).wait()
+            self._executable.logs.backup(verbose=True).wait()
 
     def ssh_list(self):
         with self.workdir:
-            return sh.cfy.ssh(list=True)
+            return self._executable_out.ssh(list=True)
 
     def ssh_run_command(self, command):
         with self.workdir:
-            return sh.cfy.ssh(command=command)
+            return self._executable_out.ssh(command=command)
 
     def install_plugins_locally(self, blueprint_path):
-        cfy.local(
+        self._executable.local(
             'install-plugins',
             blueprint_path=blueprint_path).wait()
 
@@ -474,7 +472,7 @@ class CfyHelper(object):
         if not inputs_file:
             inputs_file = self._get_inputs_in_temp_file({}, 'manager')
         with self.workdir:
-            cfy.upgrade(
+            self._executable.upgrade(
                 blueprint_path=blueprint_path,
                 inputs=inputs_file,
                 validate_only=validate_only,
@@ -484,12 +482,12 @@ class CfyHelper(object):
         if not inputs_file:
             inputs_file = self._get_inputs_in_temp_file({}, 'manager')
         with self.workdir:
-            cfy.rollback(
+            self._executable.rollback(
                 blueprint_path=blueprint_path,
                 inputs=inputs_file).wait()
 
     def set_maintenance_mode(self, activate):
-        maintenance_handler = cfy.bake('maintenance-mode')
+        maintenance_handler = self._executable.bake('maintenance-mode')
         with self.workdir:
             if activate:
                 maintenance_handler.activate(wait=True).wait()
@@ -503,3 +501,11 @@ class CfyHelper(object):
             yield
         finally:
             self.set_maintenance_mode(False)
+
+    def upload_snapshot(self, snapshot_id, path):
+        with self.workdir:
+            self._executable.snapshots.upload(s=snapshot_id, p=path)
+
+    def restore_snapshot(self, snapshot_id):
+        with self.workdir:
+            self._executable.snapshots.restore(s=snapshot_id)
