@@ -1,0 +1,42 @@
+tosca_definitions_version: cloudify_dsl_1_2
+imports:
+    - http://www.getcloudify.org/spec/cloudify/3.3.1/types.yaml
+    - http://www.getcloudify.org/spec/openstack-plugin/1.3.1/plugin.yaml
+
+inputs:
+  image:
+    description: ID of the image used to create the machine
+  flavor:
+    description: ID of the flavor used to create the machine
+  user:
+    description: User used to install the agents
+
+node_templates:
+  vm:
+    type: cloudify.openstack.nodes.WindowsServer
+    properties:
+      image: { get_input: image }
+      flavor: { get_input: flavor }
+      agent_config:
+        user: { get_input: user }
+      server:
+        userdata: |
+          <powershell>
+          &winrm quickconfig -q
+          &winrm set winrm/config              '@{MaxTimeoutms="1800000"}'
+          &winrm set winrm/config/winrs        '@{MaxMemoryPerShellMB="300"}'
+          &winrm set winrm/config/service      '@{AllowUnencrypted="true"}'
+          &winrm set winrm/config/service/auth '@{Basic="true"}'
+          &netsh advfirewall firewall add rule name="WinRM 5985" protocol=TCP dir=in localport=5985 action=allow
+          &netsh advfirewall firewall add rule name="WinRM 5986" protocol=TCP dir=in localport=5986 action=allow
+          </powershell>
+
+  http_web_server:
+    type: cloudify.nodes.Root
+    relationships:
+      - type: cloudify.relationships.contained_in
+        target: vm
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        start: scripts/start.bat
+        stop: scripts/stop.bat

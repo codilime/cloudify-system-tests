@@ -3,6 +3,4 @@ set -eax
 
 cd $manager_dir
 source $activate_path
-cfy snapshots restore -s s
-sleep 60
-cfy agents install
+cfy executions start -w uninstall -d windows

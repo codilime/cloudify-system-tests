@@ -21,10 +21,10 @@ from cosmo_tester.framework.testenv import TestCase
 
 class ResourcesAvailableTest(TestCase):
     repo_url = ('https://github.com/cloudify-cosmo/'
-                'cloudify-nodecellar-example.git')
+                'cloudify-hello-world-example.git')
 
     def test_resources_available(self):
-        blueprint_name = 'openstack-blueprint.yaml'
+        blueprint_name = 'blueprint.yaml'
         self.repo_dir = clone(self.repo_url, self.workdir)
         self.blueprint_yaml = self.repo_dir / blueprint_name
 

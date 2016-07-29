@@ -1,0 +1,1 @@
+type NUL > c:\users\administrator\desktop\file.txt

@@ -38,6 +38,8 @@ SNAPSHOT_TOOL_REPO = 'https://github.com/cloudify-cosmo/' \
 V3_3_1 = '3.3.1'
 V3_2_1 = '3.2.1'
 V3_4 = '3.4'
+V3_5 = '3.5m1'
+Vmaster = 'master'
 
 
 def setUp():
@@ -49,10 +51,11 @@ def tearDown():
 
 
 class HelloWorldSnapshotMigrationTest(TestCase):
-    def _bootstrap_manager(self, version):
+    def _bootstrap_manager(self, version, use_external_resources):
         manager_dir = self._get_manager_dir(version)
         cli_repo_dir = clone(CLI_REPO, manager_dir, version)
-        blueprint_path = self._prepare_manager_blueprint(version)
+        blueprint_path = self._prepare_manager_blueprint(
+            version, use_external_resources)
 
         arguments = {
             'manager_dir': manager_dir,
@@ -68,7 +71,7 @@ class HelloWorldSnapshotMigrationTest(TestCase):
 
         self._run_script('bootstrap_manager.sh', arguments)
 
-    def _prepare_manager_blueprint(self, version):
+    def _prepare_manager_blueprint(self, version, use_external_resources):
         blueprints_repo_path = clone(BLUEPRINTS_REPO,
                                      self._get_manager_dir(version), version)
 
@@ -79,22 +82,23 @@ class HelloWorldSnapshotMigrationTest(TestCase):
             blueprint_path = os.path.join(blueprints_repo_path,
                                           'openstack-manager-blueprint.yaml')
 
-        external_resources = [
-            'node_templates.management_network.properties',
-            'node_templates.management_subnet.properties',
-            'node_templates.router.properties',
-            'node_templates.agents_security_group.properties',
-            'node_templates.management_security_group.properties',
-        ]
-
         with YamlPatcher(blueprint_path) as patch:
             patch.merge_obj(
                 'node_templates.management_subnet.properties.subnet',
                 {'dns_nameservers': ['8.8.8.8', '8.8.4.4']}
             )
 
-            for prop in external_resources:
-                patch.merge_obj(prop, {'use_external_resource': True})
+            external_resources = [
+                'node_templates.management_network.properties',
+                'node_templates.management_subnet.properties',
+                'node_templates.router.properties',
+                'node_templates.agents_security_group.properties',
+                'node_templates.management_security_group.properties',
+            ]
+
+            if use_external_resources:
+                for prop in external_resources:
+                    patch.merge_obj(prop, {'use_external_resource': True})
 
         return blueprint_path
 
@@ -125,16 +129,23 @@ class HelloWorldSnapshotMigrationTest(TestCase):
             'external_network_name': self.env.external_network_name,
             'manager_server_name': 'manager-{}-{}'.format(self.test_id,
                                                           safe_version),
-            'management_network_name': self.env.management_network_name,
-            'management_subnet_name': self.env.management_subnet_name,
-            'management_router': self.env.management_router_name,
-            'manager_security_group_name':
-                self.env.management_security_group,
-            'agents_security_group_name': self.env.agents_security_group,
             'manager_port_name': 'manager-port-{}-{}'.format(self.test_id,
                                                              safe_version),
             'agents_user': 'ubuntu',
+            'management_network_name': 'network-{0}'.format(self.test_id),
+            'management_subnet_name': 'subnet-{0}'.format(self.test_id),
+            'management_router': 'router-{0}'.format(self.test_id),
+            'manager_security_group_name':
+                'manager-sg-{0}'.format(self.test_id),
+            'agents_security_group_name': 'agents-sg-{0}'.format(self.test_id),
         }
+
+        if version == V3_5:
+            inputs.update({
+                'agent_source_url': 'https://github.com/cloudify-cosmo/cloudify-agent/archive/master.tar.gz',
+                'plugins_common_source_url': 'https://github.com/cloudify-cosmo/cloudify-plugins-common/archive/master.tar.gz',
+                'cloudify_resources_url': 'https://github.com/cloudify-cosmo/cloudify-manager/archive/master.tar.gz'
+            })
 
         if version == V3_2_1:
             inputs['manager_private_key_path'] = os.path.join(
@@ -212,12 +223,27 @@ class HelloWorldSnapshotMigrationTest(TestCase):
 
         arguments = {
             'manager_dir': manager_dir,
-            'activate_path': os.path.join(self._get_activate_path(version)),
+            'activate_path': self._get_activate_path(version),
             'hello_blueprint_path': hello_blueprint_path,
             'inputs_path': self._prepare_hello_world_inputs()
         }
 
         self._run_script('install_hello_world.sh', arguments)
+
+    def _install_windows_example(self, version):
+        windows_blueprint_path = pkg_resources.resource_filename(
+            cosmo_tester.__name__,
+            'resources/blueprints/snapshots-migration/windows-blueprint.yaml'
+        )
+
+        arguments = {
+            'manager_dir': self._get_manager_dir(version),
+            'activate_path': self._get_activate_path(version),
+            'windows_blueprint_path': windows_blueprint_path,
+            'inputs_path': self._prepare_windows_example_inputs()
+        }
+
+        self._run_script('install_windows_example.sh', arguments)
 
     def _store_server_url(self, version):
         arguments = {
@@ -242,6 +268,14 @@ class HelloWorldSnapshotMigrationTest(TestCase):
         }
 
         self._run_script('uninstall_hello_world.sh', arguments)
+
+    def _uninstall_windows_example(self, version):
+        arguments = {
+            'manager_dir': self._get_manager_dir(version),
+            'activate_path': os.path.join(self._get_activate_path(version)),
+        }
+
+        self._run_script('uninstall_windows.sh', arguments)
 
     def _stop_hello_world(self, version):
         arguments = {
@@ -292,6 +326,18 @@ class HelloWorldSnapshotMigrationTest(TestCase):
 
             return f.name
 
+    def _prepare_windows_example_inputs(self):
+        inputs = {
+            'agent_user': self.env.windows_image_user,
+            'image': self.env.windows_image_id,
+            'flavor': self.env.flavor_name
+        }
+
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(json.dumps(inputs))
+
+            return f.name
+
     def _run_script(self, name, arguments):
         script_path = pkg_resources.resource_filename(
             cosmo_tester.__name__,
@@ -307,11 +353,11 @@ class HelloWorldSnapshotMigrationTest(TestCase):
                 name, rc))
 
     def _test_migration(self, source, destination):
-        self._bootstrap_manager(source)
+        self._bootstrap_manager(source, use_external_resources=False)
         self._install_hello_world(source)
         self._store_server_url(source)
         self._create_and_download_snapshot(source)
-        self._bootstrap_manager(destination)
+        self._bootstrap_manager(destination, use_external_resources=True)
         self._upload_snapshot(source, destination)
         self._restore_snapshot_and_install_agents(destination)
         self._assert_server_running(source)
@@ -319,8 +365,26 @@ class HelloWorldSnapshotMigrationTest(TestCase):
         self._assert_server_not_running(source)
         self._uninstall_hello_world(destination)
 
+    def _test_windows_migration(self, source, destination):
+        self._bootstrap_manager(source, use_external_resources=False)
+        self._install_windows_example(source)
+        self._create_and_download_snapshot(source)
+        self._bootstrap_manager(destination, use_external_resources=True)
+        self._upload_snapshot(source, destination)
+        self._restore_snapshot_and_install_agents(destination)
+        self._uninstall_windows_example(destination)
+
     def test_migration_331_34(self):
         self._test_migration(V3_3_1, V3_4)
 
     def test_migration_321_34(self):
         self._test_migration(V3_2_1, V3_4)
+
+    def test_migration_321_35(self):
+        self._test_migration(V3_2_1, V3_5)
+
+    def test_migration_331_35(self):
+        self._test_migration(V3_3_1, V3_5)
+
+    def test_windows_migration(self):
+        self._test_windows_migration(V3_5, Vmaster)
