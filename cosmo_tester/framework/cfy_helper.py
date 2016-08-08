@@ -389,9 +389,12 @@ class CfyHelper(object):
             return settings.get_provider_context()
 
     def install_agents(self, deployment_id=None, include_logs=False):
+        kwargs = {'include_logs': include_logs}
+        if deployment_id is not None:
+            kwargs['deployment_id'] = deployment_id
+
         with self.workdir:
-            self._executable.agents.install(deployment_id=deployment_id,
-                                            include_logs=include_logs).wait()
+            self._executable.agents.install(**kwargs).wait()
 
     def close(self):
         if self.tmpdir:

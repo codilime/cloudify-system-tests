@@ -228,18 +228,9 @@ HrWZJTXVQRjYt6dpZIECQFZsUvtTUYzFOEUsRFtB549CWWFjfbXaYx7CPbXCFYQk
 DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
 -----END RSA PRIVATE KEY-----
 """,
-            'rest_host_external_endpoint_type': 'public_ip',
-            'rest_host_internal_endpoint_type': 'private_ip',
-            'rest_service_source_url': 'https://github.com/cloudify-cosmo/cloudify-manager/archive/master.tar.gz',  # NOQA
-            'plugins_common_source_url': 'https://github.com/cloudify-cosmo/cloudify-plugins-common/archive/master.tar.gz',  # NOQA
-            'script_plugin_source_url': 'https://github.com/cloudify-cosmo/cloudify-script-plugin/archive/master.tar.gz',  # NOQA
-            'agent_source_url': 'https://github.com/cloudify-cosmo/cloudify-agent/archive/master.tar.gz',  # NOQA
-            'cli_source_url': 'https://github.com/cloudify-cosmo/cloudify-cli/archive/master.tar.gz',  # NOQA
-            'rest_client_source_url': 'https://github.com/cloudify-cosmo/cloudify-rest-client/archive/master.tar.gz',  # NOQA
-            'dsl_parser_source_url': 'https://github.com/cloudify-cosmo/cloudify-dsl-parser/archive/master.tar.gz',  # NOQA
-            'agent_package_urls': {
-                'centos_7x_agent': 'https://www.dropbox.com/s/he8kpkiw6ikfpgh/centos-Core-agent.tar.gz'  # NOQA
-            }
+
+            "rest_host_external_endpoint_type": "public_ip",
+            "rest_host_internal_endpoint_type": "private_ip",
         }
 
     def _bootstrap_local_env(self, workdir):
@@ -318,7 +309,7 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
             'https://github.com/cloudify-cosmo/cloudify-cli',
         ]:
             repo_dir = tempfile.mkdtemp(dir=self.workdir)
-            repo = clone(repo, repo_dir, 'master')
+            repo = clone(repo, repo_dir, '3.4.1-build')
             pip.install(e=repo).wait()
 
         for package in ['pyopenssl', 'ndg-httpsclient', 'pyasn1']:
@@ -357,7 +348,7 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         bootstrap_inputs = self._get_bootstrap_inputs(label)
         bootstrap_inputs.update(self._get_tls_bootstrap_inputs())
         self.bootstrap_inputs[label] = bootstrap_inputs
-        self._prepare_manager(label, 'master', bootstrap_inputs, False)
+        self._prepare_manager(label, '3.4.1-build', bootstrap_inputs, False)
 
     def _fixup_networks(self, from_label, to_label):
         nova, neutron, _ = self.env.handler.openstack_clients()
@@ -403,6 +394,8 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
             inspect = client.control.inspect()
             active = inspect.active()
             self.assertNotIn(agent_celery_name, active)
+
+        return agent_celery_name
 
     def _get_manager_ip(self, label):
         cfy = self.cfy[label]
@@ -457,9 +450,14 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         self.venvs = {}
         self.bootstrap_inputs = {}
         import pudb; pu.db  # NOQA
-        self._prepare_manager_331sec()
         self._prepare_manager_tls()
-        self._fixup_networks('sec331', 'tls')
+        self._prepare_manager_331sec()
+        agent_name = self._fixup_networks('sec331', 'tls')
+        self.cfy['tls'].upload_snapshot('snap1', self.snapshot_path)
+        self.cfy['tls'].restore_snapshot('snap1')
+        self.cfy['tls'].install_agents()
 
-        # self.cfy_tls.install_agents()
-        # XXX check celery inspect
+        with self._manager_celery_client('tls') as client:
+            inspect = client.control.inspect()
+            active = inspect.active()
+            self.assertIn(agent_name, active)
