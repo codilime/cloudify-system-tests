@@ -46,7 +46,12 @@ class CfyHelper(object):
                  management_user=None,
                  management_key=None,
                  management_port='22',
-                 executable=sh.cfy):
+                 executable=sh.cfy,
+                 username=None,
+                 password=None):
+        if username and password:
+            executable = executable.bake(_env={'CLOUDIFY_USERNAME': username,
+                                               'CLOUDIFY_PASSWORD': password})
         self._executable = sh_bake(executable)
         self._executable_out = executable
         self.logger = logging.getLogger('TESTENV')
@@ -388,10 +393,14 @@ class CfyHelper(object):
             settings = load_cloudify_working_dir_settings()
             return settings.get_provider_context()
 
-    def install_agents(self, deployment_id=None, include_logs=False):
+    def install_agents(self, deployment_id=None, include_logs=False,
+                       install_script=None):
         kwargs = {'include_logs': include_logs}
         if deployment_id is not None:
             kwargs['deployment_id'] = deployment_id
+
+        if install_script is not None:
+            kwargs['install_script'] = install_script
 
         with self.workdir:
             self._executable.agents.install(**kwargs).wait()
@@ -507,8 +516,8 @@ class CfyHelper(object):
 
     def upload_snapshot(self, snapshot_id, path):
         with self.workdir:
-            self._executable.snapshots.upload(s=snapshot_id, p=path)
+            self._executable.snapshots.upload(s=snapshot_id, p=path).wait()
 
     def restore_snapshot(self, snapshot_id):
         with self.workdir:
-            self._executable.snapshots.restore(s=snapshot_id)
+            self._executable.snapshots.restore(s=snapshot_id).wait()

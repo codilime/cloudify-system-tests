@@ -78,7 +78,7 @@ class TestAgentsMigration(TestCase):
         raise RuntimeError('No node instance {0}'.format(node_id))
 
     def _get_keys(self, prefix):
-        keys_dir = tempfile.mkdtemp(dir=self.workdir)
+        keys_dir = tempfile.mkdtemp(dir=self.workdir, prefix=prefix + '-keys-')
         ssh_key_filename = os.path.join(keys_dir, 'manager.key')
         self.addCleanup(self.env.handler.remove_keypair,
                         prefix + '-manager-key')
@@ -231,6 +231,9 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
 
             "rest_host_external_endpoint_type": "public_ip",
             "rest_host_internal_endpoint_type": "private_ip",
+
+            "plugins_common_source_url": "https://github.com/cloudify-cosmo/cloudify-plugins-common/archive/3.4.1-build.tar.gz",  # NOQA
+            "agent_source_url": "https://github.com/cloudify-cosmo/cloudify-agent/archive/3.4.1-build.tar.gz"  # NOQA
         }
 
     def _bootstrap_local_env(self, workdir):
@@ -241,7 +244,8 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
     def _prepare_manager(self, label, tag, bootstrap_inputs, patch_dns=True,
                          blueprints_repo=BLUEPRINTS_REPO):
         venv = self.venvs[label]
-        blueprints_dir = tempfile.mkdtemp(dir=self.workdir)
+        blueprints_dir = tempfile.mkdtemp(dir=self.workdir,
+                                          prefix=label + '-blueprint-')
         blueprints = clone(blueprints_repo, blueprints_dir, tag)
         blueprint_path = os.path.join(
             blueprints / 'openstack-manager-blueprint.yaml')
@@ -285,11 +289,13 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
     def _prepare_cli_331sec(self, label='sec331'):
         tag = 'tags/3.3.1-sec1'
 
-        cli_repo_dir = tempfile.mkdtemp(dir=self.workdir)
+        cli_repo_dir = tempfile.mkdtemp(dir=self.workdir,
+                                        prefix=label + '-cli-repo-')
         cli_repo = clone(CLI_REPO, cli_repo_dir, tag)
 
-        venv = tempfile.mkdtemp(dir=self.workdir)
-        self.cli_dirs[label] = tempfile.mkdtemp(dir=self.workdir)
+        venv = tempfile.mkdtemp(dir=self.workdir, prefix=label + '-venv-')
+        self.cli_dirs[label] = tempfile.mkdtemp(dir=self.workdir,
+                                                prefix=label + '-cli-')
         sh.virtualenv(venv).wait()
         pip = sh.Command(os.path.join(venv, 'bin/pip'))
         pip.install(e=cli_repo).wait()
@@ -299,7 +305,7 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         self.venvs[label] = venv
 
     def _prepare_cli_tls(self, label='tls'):
-        venv = tempfile.mkdtemp(dir=self.workdir)
+        venv = tempfile.mkdtemp(dir=self.workdir, prefix=label + '-venv-')
         sh.virtualenv(venv).wait()
         pip = sh_bake(sh.Command(os.path.join(venv, 'bin/pip')))
         for repo in [
@@ -316,9 +322,12 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
             pip.install(package).wait()
 
         cfy = sh.Command(os.path.join(venv, 'bin/cfy'))
-        self.cli_dirs[label] = tempfile.mkdtemp(dir=self.workdir)
+        self.cli_dirs[label] = tempfile.mkdtemp(dir=self.workdir,
+                                                prefix=label + '-cli-')
         self.cfy[label] = CfyHelper(cfy_workdir=self.cli_dirs[label],
-                                    executable=cfy)
+                                    executable=cfy,
+                                    username='admin',
+                                    password='admin')
         self.venvs[label] = venv
 
     def _prepare_manager_331sec(self, label='sec331'):
@@ -455,7 +464,7 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         agent_name = self._fixup_networks('sec331', 'tls')
         self.cfy['tls'].upload_snapshot('snap1', self.snapshot_path)
         self.cfy['tls'].restore_snapshot('snap1')
-        self.cfy['tls'].install_agents()
+        self.cfy['tls'].install_agents(install_script='https://raw.githubusercontent.com/cloudify-cosmo/cloudify-manager/master/resources/rest-service/cloudify/install_agent.py')  # NOQA
 
         with self._manager_celery_client('tls') as client:
             inspect = client.control.inspect()
