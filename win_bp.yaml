@@ -1,0 +1,24 @@
+tosca_definitions_version: cloudify_dsl_1_2
+
+imports:
+    - http://www.getcloudify.org/spec/cloudify/3.3.1/types.yaml
+    - http://www.getcloudify.org/spec/openstack-plugin/1.3.1/plugin.yaml
+
+node_templates:
+  vm:
+    type: cloudify.openstack.nodes.WindowsServer
+    properties:
+      image: 07a93cc5-b3f1-499b-a7f2-ab420526ae1f
+      flavor: 5e68b95a-61fe-464f-913d-df044c7e433d
+      agent_config:
+        user: Administrator
+      server:
+       userdata: |
+         #ps1_sysnative
+         winrm quickconfig -q
+         winrm set winrm/config              '@{MaxTimeoutms="1800000"}'
+         winrm set winrm/config/winrs        '@{MaxMemoryPerShellMB="300"}'
+         winrm set winrm/config/service      '@{AllowUnencrypted="true"}'
+         winrm set winrm/config/service/auth '@{Basic="true"}'
+         &netsh advfirewall firewall add rule name="WinRM 5985" protocol=TCP dir=in localport=5985 action=allow
+         &netsh advfirewall firewall add rule name="WinRM 5986" protocol=TCP dir=in localport=5986 action=allow

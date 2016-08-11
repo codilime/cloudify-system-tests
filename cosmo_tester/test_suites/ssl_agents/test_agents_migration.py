@@ -40,6 +40,18 @@ HELLOWORLD_REPO = ('https://github.com/cloudify-cosmo/'
                    'cloudify-hello-world-example')
 
 
+CENTOS_INPUTS = {
+    'image': '74ff4015-aee1-4e02-aaa8-1c77b2650394',
+    'flavor': '196235bc-7ca5-4085-ac81-7e0242bda3f9',
+    'agent_user': 'centos'
+}
+WINDOWS_INPUTS = {
+    'image': '07a93cc5-b3f1-499b-a7f2-ab420526ae1f',
+    'flavor': '9cf6e43b-e191-47ca-8665-f8592e2d6227',
+    'agent_user': 'Administrator',
+}
+
+
 class TestAgentsMigration(TestCase):
 
     def _manager_host(self, nova, label):
@@ -337,14 +349,12 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         self.bootstrap_inputs[label] = bootstrap_inputs
         self._prepare_manager(label, 'tags/3.3.1-sec1', bootstrap_inputs)
 
-        helloworld_repo = clone(HELLOWORLD_REPO, self.workdir, 'tags/3.3.1')
+        # helloworld_repo = clone(HELLOWORLD_REPO, self.workdir, 'tags/3.3.1')
         cfy_331 = self.cfy[label]
-        cfy_331.upload_blueprint('hw', helloworld_repo / 'blueprint.yaml')
-        cfy_331.create_deployment('hw', 'hw_dep', inputs={
-            'image': '74ff4015-aee1-4e02-aaa8-1c77b2650394',
-            'flavor': '196235bc-7ca5-4085-ac81-7e0242bda3f9',
-            'agent_user': 'centos'
-        })
+        # cfy_331.upload_blueprint('hw', helloworld_repo / 'blueprint.yaml')
+        cfy_331.upload_blueprint(
+            'hw', '/home/lukasz/projects/cli_work/win_bp/blueprint.yaml')
+        cfy_331.create_deployment('hw', 'hw_dep')  # , inputs=WINDOWS_INPUTS)
         cfy_331.execute_install('hw_dep')
         time.sleep(30)
         cfy_331.create_snapshot('snap1')
@@ -459,12 +469,13 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         self.venvs = {}
         self.bootstrap_inputs = {}
         import pudb; pu.db  # NOQA
-        self._prepare_manager_tls()
         self._prepare_manager_331sec()
+        self._prepare_manager_tls()
         agent_name = self._fixup_networks('sec331', 'tls')
         self.cfy['tls'].upload_snapshot('snap1', self.snapshot_path)
         self.cfy['tls'].restore_snapshot('snap1')
-        self.cfy['tls'].install_agents(install_script='https://raw.githubusercontent.com/cloudify-cosmo/cloudify-manager/master/resources/rest-service/cloudify/install_agent.py')  # NOQA
+        time.sleep(60)
+        self.cfy['tls'].install_agents(install_script='http://trewq.pl:10500/install_agent.py')  # NOQA
 
         with self._manager_celery_client('tls') as client:
             inspect = client.control.inspect()
