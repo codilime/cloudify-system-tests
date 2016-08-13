@@ -18,7 +18,7 @@ import os
 import ssl
 import time
 import tempfile
-# import threading
+import threading
 
 import celery
 import fabric
@@ -353,7 +353,7 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         cfy_331 = self.cfy[label]
         # cfy_331.upload_blueprint('hw', helloworld_repo / 'blueprint.yaml')
         cfy_331.upload_blueprint(
-            'hw', '/home/lukasz/projects/cli_work/win_bp/blueprint.yaml')
+            'hw', '/home/asdf/projects/cloudify/cloudify-system-tests/win_bp/linux_bp.yaml')
         cfy_331.create_deployment('hw', 'hw_dep')  # , inputs=WINDOWS_INPUTS)
         cfy_331.execute_install('hw_dep')
         time.sleep(30)
@@ -468,14 +468,22 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         self.cfy = {}
         self.venvs = {}
         self.bootstrap_inputs = {}
+        t1 = threading.Thread(target=self._prepare_manager_331sec)
+        t2 = threading.Thread(target=self._prepare_manager_tls)
+
+        t1.start()
+        t2.start()
+
+        t1.join()
+        t2.join()
+
         import pudb; pu.db  # NOQA
-        self._prepare_manager_331sec()
-        self._prepare_manager_tls()
         agent_name = self._fixup_networks('sec331', 'tls')
         self.cfy['tls'].upload_snapshot('snap1', self.snapshot_path)
         self.cfy['tls'].restore_snapshot('snap1')
         time.sleep(60)
-        self.cfy['tls'].install_agents(install_script='http://trewq.pl:10500/install_agent.py')  # NOQA
+
+        self.cfy['tls'].install_agents(install_script='https://raw.githubusercontent.com/cloudify-cosmo/cloudify-manager/3.4.1-build/resources/rest-service/cloudify/install_agent.py')  # NOQA
 
         with self._manager_celery_client('tls') as client:
             inspect = client.control.inspect()
