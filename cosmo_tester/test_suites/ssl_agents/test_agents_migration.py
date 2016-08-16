@@ -142,6 +142,9 @@ class TestAgentsMigration(TestCase):
     def _get_331_bootstrap_inputs(self):
         return {
             'rabbitmq_ssl_enabled': True,
+            'secure_internal_communication_enabled': True,
+            'ssl_enabled': True,
+            'security_enabled': True,
             'rabbitmq_cert_public': """-----BEGIN CERTIFICATE-----
 MIIDXTCCAkWgAwIBAgIJAItHr2leftE1MA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
 BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
@@ -198,8 +201,8 @@ y5TwfTTtYOqvOiGQQrWDLw3z8pb/wqLxUZzbPyx+DyeJeEMrP2/mWQskST6HB0BI
     def _get_tls_bootstrap_inputs(self):
         return {
             # 'install_python_compilers': True,
-            'security_enabled': True,
-            'ssl_enabled': True,
+            'security_enabled': False,
+            'ssl_enabled': False,
             'admin_username': 'admin',
             'admin_password': 'admin',
 
@@ -254,7 +257,7 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         return local.load_env('manager', storage=storage)
 
     def _prepare_manager(self, label, tag, bootstrap_inputs, patch_dns=True,
-                         blueprints_repo=BLUEPRINTS_REPO):
+                         blueprints_repo=BLUEPRINTS_REPO, cidr=None):
         venv = self.venvs[label]
         blueprints_dir = tempfile.mkdtemp(dir=self.workdir,
                                           prefix=label + '-blueprint-')
@@ -278,6 +281,13 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
                     {'dns_nameservers': ['8.8.4.4', '8.8.8.8']}
                 )
 
+        if cidr is not None:
+            with YamlPatcher(blueprint_path) as patch:
+                patch.merge_obj(
+                    'node_templates.management_subnet.properties.subnet',
+                    {'cidr': cidr}
+                )
+
         inputs_file = self.cfy[label]._get_inputs_in_temp_file(
             bootstrap_inputs, self._testMethodName + label)
         fd, bootstrap_script = tempfile.mkstemp(dir=self.workdir)
@@ -288,8 +298,9 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         source {venv}/bin/activate
         cd {workdir}
         cfy init
-        CLOUDIFY_USERNAME=cfy_agent \
-        CLOUDIFY_PASSWORD=cfy_agent \
+        CLOUDIFY_SSL_TRUST_ALL=true \
+        CLOUDIFY_USERNAME=admin \
+        CLOUDIFY_PASSWORD=admin \
         cfy bootstrap -p {blueprint_path} -i {inputs_file} \
         --install-plugins --keep-up-on-failure
             """.format(venv=venv, blueprint_path=blueprint_path,
@@ -300,6 +311,25 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
 
     def _prepare_cli_331sec(self, label='sec331'):
         tag = 'tags/3.3.1-sec1'
+
+        cli_repo_dir = tempfile.mkdtemp(dir=self.workdir,
+                                        prefix=label + '-cli-repo-')
+        cli_repo = clone(CLI_REPO, cli_repo_dir, tag)
+
+        venv = tempfile.mkdtemp(dir=self.workdir, prefix=label + '-venv-')
+        self.cli_dirs[label] = tempfile.mkdtemp(dir=self.workdir,
+                                                prefix=label + '-cli-')
+        sh.virtualenv(venv).wait()
+        pip = sh.Command(os.path.join(venv, 'bin/pip'))
+        pip.install(e=cli_repo).wait()
+        cfy = sh.Command(os.path.join(venv, 'bin/cfy'))
+        self.cfy[label] = CfyHelper(cfy_workdir=self.cli_dirs[label],
+                                    executable=cfy, username='admin',
+                                    password='admin', trust_all=True)
+        self.venvs[label] = venv
+
+    def _prepare_cli_34(self, label='34'):
+        tag = '3.4'
 
         cli_repo_dir = tempfile.mkdtemp(dir=self.workdir,
                                         prefix=label + '-cli-repo-')
@@ -362,6 +392,32 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         cfy_331.download_snapshot(
             'snap1', self.snapshot_path)
 
+    def _prepare_manager_34(self, label='34'):
+        self._prepare_cli_34(label)
+        bootstrap_inputs = self._get_bootstrap_inputs(label)
+        bootstrap_inputs.update(self._get_331_bootstrap_inputs())
+        bootstrap_inputs.update({
+            'management_subnet_dns_nameservers': ['8.8.8.8', '8.8.4.4'],
+            'install_python_compilers': True
+        })
+        self.bootstrap_inputs[label] = bootstrap_inputs
+        self._prepare_manager(label, '3.4', bootstrap_inputs,
+                              cidr='172.15.0.0/16')
+
+        # helloworld_repo = clone(HELLOWORLD_REPO, self.workdir, 'tags/3.3.1')
+        cfy_331 = self.cfy[label]
+        # cfy_331.upload_blueprint('hw', helloworld_repo / 'blueprint.yaml')
+        cfy_331.upload_blueprint(
+            'hw', '/home/asdf/projects/cloudify/cloudify-system-tests/win_bp/win_bp.yaml')
+        cfy_331.create_deployment('hw', 'hw_dep')  # , inputs=WINDOWS_INPUTS)
+        cfy_331.execute_install('hw_dep')
+        time.sleep(30)
+        cfy_331.create_snapshot('snap1')
+        self.snapshot_path = os.path.join(self.workdir, 'snap1.snap')
+        time.sleep(90)
+        cfy_331.download_snapshot(
+            'snap1', self.snapshot_path)
+
     def _prepare_manager_tls(self, label='tls'):
         self._prepare_cli_tls(label)
         bootstrap_inputs = self._get_bootstrap_inputs(label)
@@ -371,9 +427,15 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
 
     def _fixup_networks(self, from_label, to_label):
         nova, neutron, _ = self.env.handler.openstack_clients()
+        h = {
+            'Authorization': 'Basic ' + 'admin:admin'.encode('base64').strip(b'=')
+        }
         old_rest = CloudifyClient(
             host=self._get_manager_ip(from_label),
-            api_version='v2')
+            api_version='v2',
+            headers=h,
+            trust_all=True
+        )
 
         vm_instance = old_rest.node_instances.list(node_id='vm')[0]
         agent_runtime_props = vm_instance['runtime_properties']
@@ -478,6 +540,8 @@ DN51RPTgxDhccizv6poBRmTto2+yt+azNWzNEQloFxQ=
         t2.join()
 
         import pudb; pu.db  # NOQA
+        # self._prepare_manager_331sec()
+        # self._prepare_manager_tls()
         agent_name = self._fixup_networks('sec331', 'tls')
         self.cfy['tls'].upload_snapshot('snap1', self.snapshot_path)
         self.cfy['tls'].restore_snapshot('snap1')

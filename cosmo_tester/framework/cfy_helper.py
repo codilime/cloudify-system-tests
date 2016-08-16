@@ -48,10 +48,16 @@ class CfyHelper(object):
                  management_port='22',
                  executable=sh.cfy,
                  username=None,
-                 password=None):
+                 password=None,
+                 trust_all=False):
+        env = {}
         if username and password:
-            executable = executable.bake(_env={'CLOUDIFY_USERNAME': username,
-                                               'CLOUDIFY_PASSWORD': password})
+            env = {'CLOUDIFY_USERNAME': username,
+                   'CLOUDIFY_PASSWORD': password}
+        if trust_all:
+            env['CLOUDIFY_SSL_TRUST_ALL'] = 'true'
+        if env:
+            executable = executable.bake(_env=env)
         self._executable = sh_bake(executable)
         self._executable_out = executable
         self.logger = logging.getLogger('TESTENV')
